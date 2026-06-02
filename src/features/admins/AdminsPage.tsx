@@ -1,0 +1,283 @@
+// 관리자 (/admins, CLAUDE §5·§8) — 운영자 계정 목록·생성·수정·활성토글.
+// 계정 생성/수정은 Drawer(react-hook-form+zod), 비활성화는 확인 모달. 모든 변경은 admin 로그(§8).
+// 비밀번호 설정 없음 — TODO(live-verify): 실 인증 규칙(이메일/사번·임시비번 등) 확인 대상.
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { useNavigate } from 'react-router-dom'
+import { Pencil, Plus, ShieldCheck, UserPlus } from 'lucide-react'
+import { Button, ConfirmModal, Drawer, EmptyState, PageHeader, SkeletonRows } from '@/design-system/components'
+import { usePageMeta } from '@/app/uiStore'
+import { useCurrentUser } from '@/lib/auth'
+import { useStaff, useTeams } from '@/lib/staff'
+import { datetime } from '@/lib/format'
+import { ROLE_LABEL, ROLE_ORDER } from '@/lib/permissions'
+import type { Role, Staff } from '@/types/db'
+import { useSaveStaff, useToggleStaffActive, type StaffInput } from './api'
+
+const inputCls =
+  'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none focus:border-primary-500'
+const labelCls = 'mb-1.5 block text-[12px] font-semibold text-gray-600'
+const errCls = 'mt-1 text-[11.5px] text-danger'
+
+function RoleChip({ role }: { role: Role }) {
+  const tone =
+    role === 'admin'
+      ? 'bg-primary-50 text-primary-700'
+      : role === 'manager'
+        ? 'bg-info-bg text-info'
+        : 'bg-gray-100 text-gray-600'
+  return <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{ROLE_LABEL[role]}</span>
+}
+
+function ActiveChip({ active }: { active: boolean }) {
+  return active ? (
+    <span className="rounded-full bg-success-bg px-2 py-0.5 text-[11px] font-semibold text-success">활성</span>
+  ) : (
+    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">비활성</span>
+  )
+}
+
+export function AdminsPage() {
+  usePageMeta('관리자', '운영자 계정 · 권한 관리')
+  const navigate = useNavigate()
+  const me = useCurrentUser()
+
+  const { data: staff = [], isLoading } = useStaff()
+  const { data: teams = [] } = useTeams()
+  const teamName = (id: string | null) => (id ? (teams.find((t) => t.id === id)?.name ?? id) : '—')
+
+  const [edit, setEdit] = useState<Staff | 'new' | null>(null)
+  const [deactivate, setDeactivate] = useState<Staff | null>(null)
+
+  const toggle = useToggleStaffActive()
+  const sorted = [...staff].sort(
+    (a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.name.localeCompare(b.name),
+  )
+
+  const onToggle = (s: Staff) => {
+    if (s.is_active) setDeactivate(s)
+    else toggle.mutate({ id: s.id, active: true })
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="관리자"
+        description="운영자 계정을 생성·수정하고 권한 매트릭스를 관리합니다."
+        actions={
+          <>
+            <Button variant="sec" size="sm" onClick={() => navigate('/admins/roles')}>
+              <ShieldCheck className="h-4 w-4" /> 권한관리
+            </Button>
+            <Button variant="pri" size="sm" onClick={() => setEdit('new')}>
+              <Plus className="h-4 w-4" /> 새 계정
+            </Button>
+          </>
+        }
+      />
+
+      <div className="rounded-lg border border-gray-200 bg-white">
+        {isLoading ? (
+          <div className="p-4">
+            <SkeletonRows rows={5} cols={6} />
+          </div>
+        ) : sorted.length === 0 ? (
+          <EmptyState icon={<UserPlus className="h-6 w-6" />} title="등록된 운영자가 없습니다" />
+        ) : (
+          <table className="w-full text-left text-[13px]">
+            <thead className="border-b border-gray-100 bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-3 py-2.5">이름</th>
+                <th className="px-2 py-2.5">로그인 ID</th>
+                <th className="w-20 px-2 py-2.5">역할</th>
+                <th className="w-24 px-2 py-2.5">팀</th>
+                <th className="w-20 px-2 py-2.5">상태</th>
+                <th className="w-40 px-2 py-2.5 text-right">마지막 로그인</th>
+                <th className="w-32 px-3 py-2.5 text-right">관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((s) => {
+                const isMe = s.id === me?.id
+                return (
+                  <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50/60">
+                    <td className="px-3 py-2.5">
+                      <span className="font-semibold text-ink-800">{s.name}</span>
+                      {isMe && <span className="ml-1.5 text-[11px] text-gray-400">(나)</span>}
+                    </td>
+                    <td className="px-2 py-2.5 font-mono text-[12px] text-gray-600">{s.login_id}</td>
+                    <td className="px-2 py-2.5">
+                      <RoleChip role={s.role} />
+                    </td>
+                    <td className="px-2 py-2.5 text-[12px] text-gray-600">{teamName(s.team_id)}</td>
+                    <td className="px-2 py-2.5">
+                      <ActiveChip active={s.is_active} />
+                    </td>
+                    <td className="px-2 py-2.5 text-right font-mono text-[11.5px] tnum text-gray-500">
+                      {s.last_login_at ? datetime(s.last_login_at) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setEdit(s)}
+                          className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600"
+                          title="수정"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onToggle(s)}
+                          disabled={isMe}
+                          className={
+                            'rounded-md px-2 py-1 text-[11.5px] font-semibold transition-colors ' +
+                            (isMe
+                              ? 'cursor-not-allowed text-gray-300'
+                              : s.is_active
+                                ? 'text-danger hover:bg-danger-bg'
+                                : 'text-success hover:bg-success-bg')
+                          }
+                          title={isMe ? '본인 계정은 변경할 수 없습니다' : undefined}
+                        >
+                          {s.is_active ? '비활성화' : '활성화'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {edit && <StaffEditor staff={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
+
+      <ConfirmModal
+        open={!!deactivate}
+        onClose={() => setDeactivate(null)}
+        onConfirm={() =>
+          deactivate &&
+          toggle.mutate({ id: deactivate.id, active: false }, { onSuccess: () => setDeactivate(null) })
+        }
+        title="계정 비활성화"
+        description={`'${deactivate?.name ?? ''}' 계정을 비활성화합니다. 해당 계정은 로그인할 수 없습니다.`}
+        confirmText="비활성화"
+        tone="danger"
+        loading={toggle.isPending}
+      />
+    </div>
+  )
+}
+
+// ── 계정 생성/수정 ────────────────────────────────────────────────────
+const staffSchema = z.object({
+  name: z.string().min(1, '이름을 입력하세요.'),
+  login_id: z.string().min(2, '로그인 ID를 2자 이상 입력하세요.'),
+  role: z.enum(['admin', 'manager', 'leader', 'rep']),
+  team_id: z.string(),
+  is_active: z.boolean(),
+})
+type StaffForm = z.infer<typeof staffSchema>
+
+function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => void }) {
+  const save = useSaveStaff()
+  const { data: teams = [] } = useTeams()
+  const [serverErr, setServerErr] = useState<string | null>(null)
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors },
+  } = useForm<StaffForm>({
+    resolver: zodResolver(staffSchema),
+    defaultValues: {
+      name: staff?.name ?? '',
+      login_id: staff?.login_id ?? '',
+      role: staff?.role ?? 'rep',
+      team_id: staff?.team_id ?? '',
+      is_active: staff?.is_active ?? true,
+    },
+  })
+
+  const role = watch('role')
+  const submit = handleSubmit((v) => {
+    setServerErr(null)
+    const input: StaffInput = {
+      name: v.name,
+      login_id: v.login_id,
+      role: v.role,
+      team_id: v.role === 'admin' ? null : v.team_id || null,
+      is_active: v.is_active,
+    }
+    save.mutate(
+      { id: staff?.id, input },
+      { onSuccess: onClose, onError: (e) => setServerErr(e instanceof Error ? e.message : '저장에 실패했습니다.') },
+    )
+  })
+
+  return (
+    <Drawer
+      open
+      onClose={onClose}
+      title={staff ? '계정 수정' : '새 계정 생성'}
+      footer={
+        <>
+          <Button variant="sec" size="sm" onClick={onClose} disabled={save.isPending}>
+            취소
+          </Button>
+          <Button variant="pri" size="sm" onClick={submit} disabled={save.isPending}>
+            저장
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label className={labelCls}>이름</label>
+          <input className={inputCls} {...register('name')} />
+          {errors.name && <p className={errCls}>{errors.name.message}</p>}
+        </div>
+        <div>
+          <label className={labelCls}>로그인 ID</label>
+          <input className={inputCls} autoComplete="off" {...register('login_id')} />
+          {errors.login_id && <p className={errCls}>{errors.login_id.message}</p>}
+          {serverErr && <p className={errCls}>{serverErr}</p>}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>역할</label>
+            <select className={inputCls} {...register('role')}>
+              {ROLE_ORDER.map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_LABEL[r]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>팀</label>
+            <select className={inputCls} disabled={role === 'admin'} {...register('team_id')}>
+              <option value="">팀 없음</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 pt-1 text-[13px] text-gray-700">
+          <input type="checkbox" {...register('is_active')} /> 활성 계정(체크 해제 시 로그인 불가)
+        </label>
+        <p className="rounded-md bg-gray-50 px-3 py-2 text-[11.5px] leading-relaxed text-gray-500">
+          비밀번호는 이 화면에서 설정하지 않습니다. 데모 환경은 로그인 ID 로 인증합니다.
+        </p>
+      </div>
+    </Drawer>
+  )
+}

@@ -1,0 +1,375 @@
+// 사이트 설정 (/settings) — 무통장 · 등급색 · PG 다중 · 문자 · 1~5등 당첨문자 + 문자 템플릿.
+// 폼형 패턴(SectionCard + FieldRow + SaveBar), react-hook-form + zod (CLAUDE §10).
+// 등급색 저장 → settingsKeys.site 무효화 → gradeTheme 가 토큰 재적용(전 화면 Badge 반영, §3 검수).
+// 시크릿(PG api_key·SMTNT key)은 SecretField 로 마스킹, 빈 입력 시 기존값 유지. TODO(live-verify): 실 PG/문자 연동.
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Controller, useFieldArray, useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { ExternalLink, Plus, Trash2 } from 'lucide-react'
+import type { Grade, PgProvider, SiteSettings } from '@/types/db'
+import { Button } from '@/design-system/components'
+import { GRADE_LABEL } from '@/design-system/labels'
+import { usePageMeta } from '@/app/uiStore'
+import { genId } from '@/lib/db/store'
+import { cn } from '@/lib/cn'
+import {
+  FieldRow,
+  SaveBar,
+  SecretField,
+  SectionCard,
+  errCls,
+  inputCls,
+  textareaCls,
+} from './ui'
+import { useSaveSiteSettings, useSiteSettings } from './api'
+import { TemplatesCard } from './TemplatesCard'
+
+const GRADE_ORDER: readonly Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
+
+const gradeColorSchema = z.object({ fg: z.string(), bg: z.string() })
+const formSchema = z.object({
+  bank: z.object({
+    bank_name: z.string().min(1, '은행명을 입력하세요.'),
+    account_no: z.string().min(1, '계좌번호를 입력하세요.'),
+    holder: z.string().min(1, '예금주를 입력하세요.'),
+    guide: z.string(),
+  }),
+  grade_colors: z.object({
+    simple: gradeColorSchema,
+    free: gradeColorSchema,
+    gold: gradeColorSchema,
+    goldp: gradeColorSchema,
+    vip: gradeColorSchema,
+    royal: gradeColorSchema,
+    ovr: gradeColorSchema,
+    toss: gradeColorSchema,
+  }),
+  pg: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string().min(1, '명칭을 입력하세요.'),
+      enabled: z.boolean(),
+      mid: z.string(),
+      apiKeyNew: z.string(),
+      tidsText: z.string(),
+      memo: z.string(),
+    }),
+  ),
+  sms: z.object({
+    sender_no: z.string().min(1, '발신번호를 입력하세요.'),
+    smtnt_id: z.string(),
+    smtntKeyNew: z.string(),
+    schedule_enabled: z.boolean(),
+    schedule_days_before: z.string().regex(/^\d+$/, '0 이상의 숫자'),
+    schedule_time: z.string(),
+  }),
+  win_messages: z.array(z.object({ rank: z.number(), body: z.string().min(1, '문구를 입력하세요.') })),
+})
+type FormValues = z.infer<typeof formSchema>
+
+function toForm(s: SiteSettings): FormValues {
+  return {
+    bank: { ...s.bank },
+    grade_colors: structuredClone(s.grade_colors),
+    pg: s.pg_providers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      enabled: p.enabled,
+      mid: p.mid,
+      apiKeyNew: '',
+      tidsText: p.tids.join('\n'),
+      memo: p.memo ?? '',
+    })),
+    sms: {
+      sender_no: s.sms.sender_no,
+      smtnt_id: s.sms.smtnt_id,
+      smtntKeyNew: '',
+      schedule_enabled: s.sms.schedule_enabled,
+      schedule_days_before: String(s.sms.schedule_days_before),
+      schedule_time: s.sms.schedule_time,
+    },
+    win_messages: s.win_messages.map((w) => ({ rank: w.rank, body: w.body })),
+  }
+}
+
+function parseTids(text: string): string[] {
+  return text
+    .split(/[\n,]/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+}
+
+function toSettings(v: FormValues, prev: SiteSettings): SiteSettings {
+  const prevPg: Record<string, PgProvider> = {}
+  for (const p of prev.pg_providers) prevPg[p.id] = p
+  return {
+    bank: { ...v.bank },
+    grade_colors: v.grade_colors,
+    pg_providers: v.pg.map((r) => ({
+      id: r.id,
+      name: r.name.trim(),
+      enabled: r.enabled,
+      mid: r.mid.trim(),
+      api_key: r.apiKeyNew.trim() || prevPg[r.id]?.api_key || '',
+      tids: parseTids(r.tidsText),
+      memo: r.memo.trim() || null,
+    })),
+    sms: {
+      sender_no: v.sms.sender_no.trim(),
+      smtnt_id: v.sms.smtnt_id.trim(),
+      smtnt_key: v.sms.smtntKeyNew.trim() || prev.sms.smtnt_key,
+      schedule_enabled: v.sms.schedule_enabled,
+      schedule_days_before: Number(v.sms.schedule_days_before) || 0,
+      schedule_time: v.sms.schedule_time,
+    },
+    win_messages: v.win_messages.map((w) => ({ rank: w.rank, body: w.body })),
+    report: prev.report,
+    lotto_exclude: prev.lotto_exclude,
+    terms: prev.terms,
+  }
+}
+
+export function SiteSettingsPage() {
+  usePageMeta('설정', '사이트 · 등급색 · PG · 문자 · 당첨문자')
+  const navigate = useNavigate()
+  const { data: settings, isLoading } = useSiteSettings()
+  const save = useSaveSiteSettings()
+  const [resetKey, setResetKey] = useState(0)
+
+  const {
+    register,
+    control,
+    handleSubmit,
+    reset,
+    watch,
+    getValues,
+    formState: { errors, isDirty },
+  } = useForm<FormValues>({ resolver: zodResolver(formSchema) })
+
+  const pgArray = useFieldArray({ control, name: 'pg' })
+  const winArray = useFieldArray({ control, name: 'win_messages' })
+
+  useEffect(() => {
+    if (settings) {
+      reset(toForm(settings))
+      setResetKey((k) => k + 1)
+    }
+  }, [settings, reset])
+
+  const gradeColors = watch('grade_colors')
+
+  async function onSubmit(v: FormValues) {
+    if (!settings) return
+    await save.mutateAsync(toSettings(v, settings))
+    // onSuccess 무효화 → settings 갱신 → 위 effect 가 reset (isDirty=false, SecretField 접힘)
+  }
+
+  const saved = save.isSuccess && !isDirty
+
+  if (isLoading || !settings) {
+    return <div className="py-16 text-center text-[13px] text-gray-400">설정을 불러오는 중…</div>
+  }
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)}>
+      {/* ── 무통장 입금 설정 ─────────────────────────── */}
+      <SectionCard title="무통장 입금 설정" desc="무통장 결제 안내에 노출되는 입금 계좌 정보입니다.">
+        <FieldRow label="은행" htmlFor="bank_name">
+          <input id="bank_name" className={inputCls} {...register('bank.bank_name')} />
+          {errors.bank?.bank_name && <p className={errCls}>{errors.bank.bank_name.message}</p>}
+        </FieldRow>
+        <FieldRow label="계좌번호" htmlFor="account_no">
+          <input id="account_no" className={cn(inputCls, 'font-mono')} {...register('bank.account_no')} />
+          {errors.bank?.account_no && <p className={errCls}>{errors.bank.account_no.message}</p>}
+        </FieldRow>
+        <FieldRow label="예금주" htmlFor="holder">
+          <input id="holder" className={inputCls} {...register('bank.holder')} />
+          {errors.bank?.holder && <p className={errCls}>{errors.bank.holder.message}</p>}
+        </FieldRow>
+        <FieldRow label="입금 안내문" htmlFor="bank_guide" align="start">
+          <textarea id="bank_guide" rows={2} className={textareaCls} {...register('bank.guide')} />
+        </FieldRow>
+      </SectionCard>
+
+      {/* ── 유저 등급색 ──────────────────────────────── */}
+      <SectionCard
+        title="유저 등급색"
+        desc="등급 뱃지 색입니다. 저장 시 모든 화면의 등급 표시에 즉시 반영됩니다."
+      >
+        <div className="space-y-2">
+          {GRADE_ORDER.map((g) => {
+            const c = gradeColors?.[g]
+            return (
+              <div
+                key={g}
+                className="grid items-center gap-3 border-b border-gray-50 py-2 last:border-b-0 sm:grid-cols-[120px_1fr]"
+              >
+                <div className="flex items-center gap-2">
+                  {/* 미저장 미리보기(폼 값 인라인 스타일) */}
+                  <span
+                    className="inline-flex items-center gap-[5px] rounded-full px-[9px] py-[3px] text-[11px] font-bold"
+                    style={c ? { backgroundColor: c.bg, color: c.fg } : undefined}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full" style={c ? { backgroundColor: c.fg } : undefined} />
+                    {GRADE_LABEL[g]}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="flex items-center gap-2 text-[12px] text-gray-500">
+                    글자
+                    <input type="color" className="h-7 w-9 cursor-pointer rounded border border-gray-200 bg-white p-0.5" {...register(`grade_colors.${g}.fg`)} />
+                    <input className={cn(inputCls, 'h-8 w-[92px] font-mono text-[11.5px]')} {...register(`grade_colors.${g}.fg`)} />
+                  </label>
+                  <label className="flex items-center gap-2 text-[12px] text-gray-500">
+                    배경
+                    <input type="color" className="h-7 w-9 cursor-pointer rounded border border-gray-200 bg-white p-0.5" {...register(`grade_colors.${g}.bg`)} />
+                    <input className={cn(inputCls, 'h-8 w-[92px] font-mono text-[11.5px]')} {...register(`grade_colors.${g}.bg`)} />
+                  </label>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </SectionCard>
+
+      {/* ── PG 설정 (다중) ───────────────────────────── */}
+      <SectionCard
+        title="PG 설정"
+        desc="결제대행(PG) 채널을 다중 운영합니다. API 키는 보안상 마스킹되며, '변경' 시에만 새 키를 입력합니다."
+        action={
+          <Button
+            variant="sec"
+            size="sm"
+            icon={<Plus className="h-3.5 w-3.5" />}
+            onClick={() =>
+              pgArray.append({ id: genId('pg'), name: '', enabled: true, mid: '', apiKeyNew: '', tidsText: '', memo: '' })
+            }
+          >
+            PG 추가
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          {pgArray.fields.map((field, i) => {
+            // field.id 는 useFieldArray 가 부여한 React 키(비즈니스 id 를 가림) → 실제 id 는 폼 값에서 읽는다.
+            const stored = settings.pg_providers.find((p) => p.id === getValues(`pg.${i}.id`))?.api_key ?? ''
+            return (
+              <div key={field.id} className="rounded-lg border border-gray-200 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <input
+                    className={cn(inputCls, 'h-9 max-w-[220px] font-semibold')}
+                    placeholder="PG 명칭"
+                    {...register(`pg.${i}.name`)}
+                  />
+                  <label className="flex items-center gap-1.5 text-[12px] text-gray-600">
+                    <input type="checkbox" {...register(`pg.${i}.enabled`)} /> 사용
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => pgArray.remove(i)}
+                    className="ml-auto grid h-8 w-8 place-items-center rounded-md text-gray-400 transition-colors hover:bg-danger-bg hover:text-danger"
+                    aria-label="PG 삭제"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+                {errors.pg?.[i]?.name && <p className={cn(errCls, 'mb-1')}>{errors.pg[i]?.name?.message}</p>}
+                <div className="grid gap-x-4 sm:grid-cols-2">
+                  <FieldRow label="상점 ID(MID)" align="center">
+                    <input className={cn(inputCls, 'font-mono')} {...register(`pg.${i}.mid`)} />
+                  </FieldRow>
+                  <FieldRow label="API 키" align="center">
+                    <Controller
+                      control={control}
+                      name={`pg.${i}.apiKeyNew`}
+                      render={({ field: f }) => (
+                        <SecretField key={`${field.id}-${resetKey}`} stored={stored} value={f.value} onChange={f.onChange} />
+                      )}
+                    />
+                  </FieldRow>
+                  <FieldRow label="단말기 ID(TID)" align="start" hint="여러 개는 줄바꿈 또는 쉼표로 구분">
+                    <textarea rows={2} className={cn(textareaCls, 'font-mono text-[12px]')} {...register(`pg.${i}.tidsText`)} />
+                  </FieldRow>
+                  <FieldRow label="메모" align="center">
+                    <input className={inputCls} {...register(`pg.${i}.memo`)} />
+                  </FieldRow>
+                </div>
+              </div>
+            )
+          })}
+          {pgArray.fields.length === 0 && (
+            <p className="py-4 text-center text-[12.5px] text-gray-400">등록된 PG 가 없습니다. ‘PG 추가’로 채널을 등록하세요.</p>
+          )}
+        </div>
+      </SectionCard>
+
+      {/* ── 문자 설정 ────────────────────────────────── */}
+      <SectionCard title="문자 설정" desc="발신번호 · 문자 발송 연동(SMTNT) · 추천번호 발송 스케줄.">
+        <FieldRow label="발신번호" htmlFor="sender_no">
+          <input id="sender_no" className={cn(inputCls, 'max-w-[220px] font-mono')} {...register('sms.sender_no')} />
+          {errors.sms?.sender_no && <p className={errCls}>{errors.sms.sender_no.message}</p>}
+        </FieldRow>
+        <FieldRow label="SMTNT 계정" htmlFor="smtnt_id">
+          <input id="smtnt_id" className={cn(inputCls, 'max-w-[260px]')} {...register('sms.smtnt_id')} />
+        </FieldRow>
+        <FieldRow label="SMTNT API 키">
+          <Controller
+            control={control}
+            name="sms.smtntKeyNew"
+            render={({ field: f }) => (
+              <SecretField key={`smtnt-${resetKey}`} stored={settings.sms.smtnt_key} value={f.value} onChange={f.onChange} />
+            )}
+          />
+        </FieldRow>
+        <FieldRow label="발송 스케줄" align="start">
+          <label className="mb-2 flex items-center gap-2 text-[13px] text-gray-700">
+            <input type="checkbox" {...register('sms.schedule_enabled')} /> 자동 발송 사용
+          </label>
+          <div className="flex flex-wrap items-center gap-2 text-[13px] text-gray-600">
+            추첨
+            <input
+              className={cn(inputCls, 'h-9 w-16 text-center')}
+              inputMode="numeric"
+              {...register('sms.schedule_days_before')}
+            />
+            일 전
+            <input type="time" className={cn(inputCls, 'h-9 w-[120px]')} {...register('sms.schedule_time')} />
+            발송
+          </div>
+          {errors.sms?.schedule_days_before && <p className={errCls}>{errors.sms.schedule_days_before.message}</p>}
+        </FieldRow>
+      </SectionCard>
+
+      {/* ── 1~5등 당첨문자 ───────────────────────────── */}
+      <SectionCard title="당첨 안내문자 (1~5등)" desc="당첨 확정 시 등수별로 발송되는 문자입니다. $name · $contents 변수 사용 가능.">
+        <div className="space-y-2.5">
+          {winArray.fields.map((field, i) => (
+            <FieldRow key={field.id} label={`${field.rank}등`} align="start">
+              <textarea rows={2} className={textareaCls} {...register(`win_messages.${i}.body`)} />
+              {errors.win_messages?.[i]?.body && <p className={errCls}>{errors.win_messages[i]?.body?.message}</p>}
+            </FieldRow>
+          ))}
+        </div>
+      </SectionCard>
+
+      <SaveBar dirty={isDirty} saving={save.isPending} saved={saved} onReset={() => reset(toForm(settings))} />
+
+      {/* ── 문자 템플릿(기본 멘트) — 별도 엔터티(sms_templates) ── */}
+      <TemplatesCard />
+
+      {/* ── FAQ · 공지 설정(기존 모듈 연결) ───────────── */}
+      <SectionCard title="FAQ · 공지 설정" desc="FAQ 와 공지사항은 고객센터 · 커뮤니티에서 관리합니다.">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="sec" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => navigate('/support')}>
+            FAQ 관리(고객센터)
+          </Button>
+          <Button variant="sec" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => navigate('/community')}>
+            공지 관리(커뮤니티)
+          </Button>
+        </div>
+      </SectionCard>
+    </form>
+  )
+}

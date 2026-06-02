@@ -1,0 +1,105 @@
+// 관리자(운영자 계정·권한 매트릭스) 데이터 훅 (CLAUDE §5·§8). 전부 TanStack Query 경유.
+// 계정 생성/수정/활성토글 + 권한 매트릭스 저장 → mock DB 변경 + admin 로그 적재 후 무효화.
+// TODO(live-verify): 실제 환경의 계정 비밀번호 설정·인증 규칙 미확인 → mock 은 비밀번호 없음(로그인 ID 기반).
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import type { LogEntry, Role, Staff } from '@/types/db'
+import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
+import { useCurrentUser } from '@/lib/auth'
+import { staffKeys } from '@/lib/staff'
+import { navAccessKeys } from '@/lib/navAccess'
+import type { NavAccessMap } from '@/lib/permissions'
+
+function adminLog(
+  actor: string | null,
+  action: string,
+  targetType: string,
+  targetId: string | null,
+  meta: Record<string, unknown> = {},
+): LogEntry {
+  return {
+    id: genId('log'),
+    kind: 'admin',
+    actor,
+    action,
+    target_type: targetType,
+    target_id: targetId,
+    meta,
+    created_at: nowIso(),
+  }
+}
+
+export interface StaffInput {
+  name: string
+  login_id: string
+  role: Role
+  team_id: string | null
+  is_active: boolean
+}
+
+/** 운영자 계정 생성/수정. login_id 중복은 거부(throw)한다. */
+export function useSaveStaff() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: { id?: string; input: StaffInput }) => {
+      const login = v.input.login_id.trim()
+      const dup = readDb().staff.find(
+        (s) => s.login_id.toLowerCase() === login.toLowerCase() && s.id !== v.id,
+      )
+      if (dup) throw new Error('이미 사용 중인 로그인 ID 입니다.')
+      const id = v.id ?? genId('staff')
+      const name = v.input.name.trim()
+      // admin 은 팀 소속 없음(전체 관리).
+      const team_id = v.input.role === 'admin' ? null : v.input.team_id
+      mutateDb((db) => {
+        if (v.id) {
+          const s = db.staff.find((x) => x.id === v.id)
+          if (!s) return
+          Object.assign(s, { name, login_id: login, role: v.input.role, team_id, is_active: v.input.is_active })
+          db.logs.push(adminLog(user?.id ?? null, 'staff.update', 'staff', v.id, { name, role: v.input.role }))
+        } else {
+          const s: Staff = { id, login_id: login, name, role: v.input.role, team_id, is_active: v.input.is_active, last_login_at: null }
+          db.staff.push(s)
+          db.logs.push(adminLog(user?.id ?? null, 'staff.create', 'staff', id, { name, role: v.input.role, login_id: login }))
+        }
+      })
+      return id
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: staffKeys.all }),
+  })
+}
+
+/** 계정 활성/비활성 토글(삭제 대신 비활성으로 운영). */
+export function useToggleStaffActive() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: { id: string; active: boolean }) => {
+      mutateDb((db) => {
+        const s = db.staff.find((x) => x.id === v.id)
+        if (!s) return
+        s.is_active = v.active
+        db.logs.push(adminLog(user?.id ?? null, v.active ? 'staff.activate' : 'staff.deactivate', 'staff', v.id, { name: s.name }))
+      })
+      return v.id
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: staffKeys.all }),
+  })
+}
+
+/** 권한 매트릭스 저장 → 사이드바/가드가 즉시 반영(§8). 맵은 깊은 복제해 참조 공유를 막는다. */
+export function useSaveNavAccess() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (map: NavAccessMap) => {
+      const next: NavAccessMap = {}
+      for (const [k, v] of Object.entries(map)) next[k] = [...v]
+      mutateDb((db) => {
+        db.nav_access = next
+        db.logs.push(adminLog(user?.id ?? null, 'roles.update', 'nav_access', null, { modules: Object.keys(next).length }))
+      })
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: navAccessKeys.all }),
+  })
+}
