@@ -12,8 +12,11 @@ import type {
   Product,
 } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 import { useCurrentUser, type CurrentUser } from '@/lib/auth'
 import { memberKeys, paymentKeys, revenueKeys } from '@/lib/queryKeys'
+import * as supa from './supa'
 
 export { paymentKeys }
 
@@ -133,8 +136,11 @@ export function usePayments(q: PaymentsQuery) {
   const user = useCurrentUser()
   return useQuery({
     queryKey: paymentKeys.list({ ...q, uid: user?.id ?? 'anon', role: user?.role ?? 'none' }),
-    queryFn: (): PaymentsResult => {
-      const db = readDb()
+    queryFn: async (): Promise<PaymentsResult> => {
+      const db =
+        dataSource === 'supabase'
+          ? await fetchTables(['members', 'products', 'payments'])
+          : readDb()
       const members = indexBy(db.members)
       const products = indexBy(db.products)
       const scoped = scopePayments(db.payments, members, user)
@@ -159,8 +165,9 @@ export function usePaymentCounts() {
   const user = useCurrentUser()
   return useQuery({
     queryKey: paymentKeys.counts(`${user?.id ?? 'anon'}:${user?.role ?? 'none'}`),
-    queryFn: (): Record<PaymentStatusTab, number> => {
-      const db = readDb()
+    queryFn: async (): Promise<Record<PaymentStatusTab, number>> => {
+      const db =
+        dataSource === 'supabase' ? await fetchTables(['members', 'payments']) : readDb()
       const members = indexBy(db.members)
       const scoped = scopePayments(db.payments, members, user)
       const out: Record<PaymentStatusTab, number> = {
@@ -179,8 +186,11 @@ export function usePaymentCounts() {
 export function usePayment(id: string | null) {
   return useQuery({
     queryKey: paymentKeys.detail(id ?? ''),
-    queryFn: (): PaymentRow | null => {
-      const db = readDb()
+    queryFn: async (): Promise<PaymentRow | null> => {
+      const db =
+        dataSource === 'supabase'
+          ? await fetchTables(['members', 'products', 'payments'])
+          : readDb()
       const p = db.payments.find((x) => x.id === id)
       if (!p) return null
       return enrich(p, indexBy(db.members), indexBy(db.products))
@@ -235,6 +245,7 @@ export function useApprovePayment() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { id: string }) => {
+      if (dataSource === 'supabase') return supa.approvePayment(v.id, user?.id ?? null)
       let memberId: string | null = null
       mutateDb((db) => {
         const p = db.payments.find((x) => x.id === v.id)
@@ -272,6 +283,7 @@ export function useCancelPayment() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { id: string }) => {
+      if (dataSource === 'supabase') return supa.cancelPayment(v.id, user?.id ?? null)
       let memberId: string | null = null
       mutateDb((db) => {
         const p = db.payments.find((x) => x.id === v.id)
@@ -322,7 +334,10 @@ export function useCancelPayment() {
 export function useActiveProducts() {
   return useQuery({
     queryKey: ['products', 'active'],
-    queryFn: () => readDb().products.filter((p) => p.is_active),
+    queryFn: async () =>
+      (dataSource === 'supabase' ? await fetchTables(['products']) : readDb()).products.filter(
+        (p) => p.is_active,
+      ),
   })
 }
 
@@ -339,8 +354,8 @@ export function useMemberSearch(term: string) {
   const user = useCurrentUser()
   return useQuery({
     queryKey: ['payments', 'member-search', term, user?.id ?? 'anon', user?.role ?? 'none'],
-    queryFn: (): MemberOption[] => {
-      const db = readDb()
+    queryFn: async (): Promise<MemberOption[]> => {
+      const db = dataSource === 'supabase' ? await fetchTables(['members']) : readDb()
       let scoped: Member[]
       if (!user) scoped = []
       else if (user.role === 'admin' || user.role === 'manager') scoped = [...db.members]
@@ -379,6 +394,7 @@ export function useCreateManualPayment() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: ManualPaymentInput) => {
+      if (dataSource === 'supabase') return supa.createManualPayment(v, user?.id ?? null)
       const id = genId('pay')
       mutateDb((db) => {
         const member = db.members.find((m) => m.id === v.memberId)

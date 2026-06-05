@@ -4,6 +4,8 @@
 import { useQuery } from '@tanstack/react-query'
 import type { LogEntry, LogKind } from '@/types/db'
 import { readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 
 export const logKeys = {
   all: ['logs'] as const,
@@ -13,10 +15,12 @@ export const logKeys = {
 export function useLogs(kind: LogKind) {
   return useQuery({
     queryKey: logKeys.byKind(kind),
-    queryFn: (): LogEntry[] =>
-      readDb()
-        .logs.filter((l) => l.kind === kind)
-        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    queryFn: async (): Promise<LogEntry[]> => {
+      const db = dataSource === 'supabase' ? await fetchTables(['logs']) : readDb()
+      return db.logs
+        .filter((l) => l.kind === kind)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    },
     staleTime: 0,
     refetchOnMount: 'always',
   })

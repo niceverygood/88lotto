@@ -5,8 +5,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LogEntry, SiteSettings, SmsTemplate } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchSiteSettings, fetchTables } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
 import { settingsKeys, smsTemplateKeys } from '@/lib/queryKeys'
+import * as supa from './supa'
 
 function adminLog(
   actor: string | null,
@@ -33,7 +36,11 @@ function jsonClone<T>(v: T): T {
 }
 
 export function useSiteSettings() {
-  return useQuery({ queryKey: settingsKeys.site(), queryFn: () => readDb().site_settings })
+  return useQuery({
+    queryKey: settingsKeys.site(),
+    queryFn: async () =>
+      dataSource === 'supabase' ? await fetchSiteSettings() : readDb().site_settings,
+  })
 }
 
 /** 사이트 설정 전체 저장(무통장·등급색·PG·문자·당첨문자). 등급색 변경은 토큰으로 전파(§3). */
@@ -42,6 +49,7 @@ export function useSaveSiteSettings() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (next: SiteSettings) => {
+      if (dataSource === 'supabase') return supa.saveSiteSettings(next, user?.id ?? null)
       const value = jsonClone(next)
       mutateDb((db) => {
         db.site_settings = value
@@ -57,7 +65,11 @@ export function useSaveSiteSettings() {
 }
 
 export function useSmsTemplates() {
-  return useQuery({ queryKey: smsTemplateKeys.all, queryFn: () => readDb().sms_templates })
+  return useQuery({
+    queryKey: smsTemplateKeys.all,
+    queryFn: async () =>
+      (dataSource === 'supabase' ? await fetchTables(['sms_templates']) : readDb()).sms_templates,
+  })
 }
 
 /** 문자 템플릿 일괄 저장. members 쪽 useSmsTemplates 도 같은 키라 함께 갱신된다(§8). */
@@ -66,6 +78,7 @@ export function useSaveSmsTemplates() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (templates: SmsTemplate[]) => {
+      if (dataSource === 'supabase') return supa.saveSmsTemplates(templates, user?.id ?? null)
       const value = jsonClone(templates)
       mutateDb((db) => {
         for (const tpl of value) {

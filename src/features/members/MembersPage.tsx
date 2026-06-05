@@ -2,9 +2,10 @@
 // FilterBar(검색·등급·상태·담당·유입, URL 동기화), DataTable(서버 정렬·페이지·선택),
 // 일괄작업 바, 행 클릭 → 상세 Drawer. 모든 데이터는 api 훅 경유.
 import { useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Plus, Upload } from 'lucide-react'
 import type { OnChangeFn, SortingState } from '@tanstack/react-table'
 import {
+  Button,
   DataTable,
   FilterBar,
   PageHeader,
@@ -36,6 +37,8 @@ import {
 import { memberColumns, memberColumnVisibility } from './columns'
 import { MemberBulkActions } from './bulk'
 import { MemberDrawer } from './MemberDrawer'
+import { MemberCreateDrawer } from './MemberCreateDrawer'
+import { ImportMembersModal } from './ImportMembersModal'
 
 const PAGE_SIZE = 50
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
@@ -54,6 +57,8 @@ export function MembersPage() {
 
   const [moreOpen, setMoreOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   // ── URL → 쿼리 상태 ──────────────────────────────
   const viewKey = get('view') ?? 'all'
@@ -150,7 +155,22 @@ export function MembersPage() {
 
   return (
     <div>
-      <PageHeader title="이용자" description="회원 세그먼트 관리 · 담당 배정 · 문자 발송" />
+      <PageHeader
+        title="이용자"
+        description="회원 세그먼트 관리 · 담당 배정 · 문자 발송"
+        actions={
+          role !== 'rep' ? (
+            <>
+              <Button variant="sec" size="sm" onClick={() => setImporting(true)}>
+                <Upload className="h-4 w-4" /> 일괄 임포트
+              </Button>
+              <Button variant="pri" size="sm" onClick={() => setCreating(true)}>
+                <Plus className="h-4 w-4" /> 신규 등록
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
       {/* 탭 + 더보기 */}
       <div className="mb-3 flex items-end gap-2">
@@ -303,6 +323,8 @@ export function MembersPage() {
       />
 
       <MemberDrawer memberId={selectedId} onClose={() => setSelectedId(null)} />
+      {creating && <MemberCreateDrawer onClose={() => setCreating(false)} />}
+      {importing && <ImportMembersModal onClose={() => setImporting(false)} />}
     </div>
   )
 }

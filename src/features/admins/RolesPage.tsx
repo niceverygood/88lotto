@@ -2,10 +2,11 @@
 // 원본 `08 권한관리` 화면 미확인 → 매트릭스 구조로 구현(ASSUMPTIONS). 저장 시 nav_access 영속 →
 // 사이드바/라우트 가드가 즉시 반영(§8). admin 의 관리자·로그 접근은 자기잠금 방지로 항상 ON(고정).
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Lock, RotateCcw } from 'lucide-react'
 import { Button, PageHeader, SkeletonRows } from '@/design-system/components'
 import { usePageMeta } from '@/app/uiStore'
+import { useCurrentUser } from '@/lib/auth'
 import { useNavAccess } from '@/lib/navAccess'
 import {
   ADMIN_LOCKED,
@@ -36,6 +37,7 @@ const isLockedCell = (key: NavKey, role: Role) => role === 'admin' && ADMIN_LOCK
 export function RolesPage() {
   usePageMeta('권한관리', '역할별 메뉴 노출 매트릭스')
   const navigate = useNavigate()
+  const me = useCurrentUser()
   const { data, isLoading } = useNavAccess()
   const save = useSaveNavAccess()
 
@@ -65,6 +67,9 @@ export function RolesPage() {
     isLockedCell(key, role) || !!draft?.[key]?.includes(role)
 
   const dirty = !!draft && !!data && norm(draft) !== norm(data)
+
+  // 권한 매트릭스 편집은 admin(총괄) 전용 — 실장·팀장은 계정관리(/admins)만 접근(계층 위임, §5).
+  if (me && me.role !== 'admin') return <Navigate to="/admins" replace />
 
   return (
     <div>

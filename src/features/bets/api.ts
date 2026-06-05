@@ -4,6 +4,8 @@
 import { useQuery } from '@tanstack/react-query'
 import type { Bet } from '@/types/db'
 import { readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 import { betKeys, lottoKeys } from '@/lib/queryKeys'
 
 export interface BetRow extends Bet {
@@ -45,8 +47,11 @@ function matchSearch(b: BetRow, s: string): boolean {
 export function useBets(q: BetsQuery) {
   return useQuery({
     queryKey: betKeys.list({ round: q.round, search: q.search, page: q.page, pageSize: q.pageSize }),
-    queryFn: (): BetsResult => {
-      const db = readDb()
+    queryFn: async (): Promise<BetsResult> => {
+      const db =
+        dataSource === 'supabase'
+          ? await fetchTables(['members', 'lotto_rounds', 'bets'])
+          : readDb()
       const memberName: Record<string, string> = {}
       for (const m of db.members) memberName[m.id] = m.name
       const roundById = new Map(db.lotto_rounds.map((r) => [r.round_no, r]))
@@ -86,9 +91,9 @@ export interface RoundOption {
 export function useBetRoundOptions() {
   return useQuery({
     queryKey: lottoKeys.rounds({ as: 'bet-options' }),
-    queryFn: (): RoundOption[] =>
-      readDb()
-        .lotto_rounds.map((r) => ({ round_no: r.round_no, confirmed: r.confirmed_at != null }))
+    queryFn: async (): Promise<RoundOption[]> =>
+      (dataSource === 'supabase' ? await fetchTables(['lotto_rounds']) : readDb()).lotto_rounds
+        .map((r) => ({ round_no: r.round_no, confirmed: r.confirmed_at != null }))
         .sort((a, b) => b.round_no - a.round_no),
   })
 }

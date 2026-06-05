@@ -199,3 +199,64 @@
 - **결정**: `vite.config.ts` `build.rollupOptions.output.manualChunks` 로 react/query/charts/supabase 4개 벤더 청크 분리. 단일 1.25MB 청크 → 최대 청크 < 500KB(앱 394KB·charts 383KB·supabase 211KB·react 157KB·query 101KB).
 - **이유**: Vite 의 500KB 청크 경고 해소 + 벤더 캐시 분리(앱 코드만 바뀌면 무거운 recharts/supabase 청크는 재다운로드 안 함). 빌드 설정만 변경 — 앱 코드·런타임 무영향(라우트 lazy/Suspense 도입 안 함, 마감 시점 회귀 위험 회피).
 - **영향**: `npm run build` 경고 없이 통과. 추가 최적화(라우트 코드 스플리팅)는 필요 시 후속.
+
+## 2026-06-03 · 계정관리 계층 위임
+
+### D38. 계정관리 = admin 단독 → 상위→하위 계층 위임 (실장·팀장에게 본인 하위 직원 관리 위임)
+- **결정**: 사용자 요청("총괄관리자에서 하위 관리자 관리 + 하이라키 권한", 옵션 "계층 위임" 확정)에 따라 `/admins` 계정관리를 admin 전용에서 **상위→하위 위임**으로 확장.
+  - 권한 규칙(`lib/permissions.ts`): `canManageStaff(actor,target)` = admin 은 전원 true / 그 외는 `ROLE_ORDER` 인덱스로 자신보다 하위만 / 팀장(leader)은 추가로 `teamId` 일치(본인 팀)만. `assignableRoles(actor)` = admin → 전원(자신 포함), 그 외 → 자신보다 하위만.
+  - 화면(`AdminsPage.tsx`): 목록을 `canManageStaff(me,·)` 로 스코프(admin=전원, 실장=팀장·담당, 팀장=본인팀 담당) / 역할 드롭다운을 `assignableRoles(me.role)` 로 제한 / 본인 행 편집 시 역할 select 잠금(+안내) / 팀장은 팀 select 를 본인 팀으로 고정 / "권한관리" 버튼은 admin 에게만 노출 / 비활성화 버튼은 본인(isMe) 비활성.
+  - 서버측(mock, `admins/api.ts`): `useSaveStaff`·`useToggleStaffActive` 진입부에서 동일 가드를 재검증(부여 역할 범위·대상 관리권한·본인 역할변경/본인 토글 차단) — UI 우회 방지.
+  - 메뉴 노출(`DEFAULT_NAV_ACCESS.admins` = `['admin','manager','leader']`): 실장·팀장 사이드바에 '관리자' 노출. `nav_access` 는 시드 스냅샷이므로 `store.ts` DB_VERSION 6→7 로 올려 기존 localStorage 자동 재시드.
+  - 매트릭스 편집 분리: `/admins`·`/admins/roles` 가 같은 navKey `'admins'` 를 공유하므로, 권한 매트릭스(`RolesPage`)는 컴포넌트 내부에서 `me.role !== 'admin'` 이면 `<Navigate to="/admins"/>` 로 admin 전용 가드. (별도 navKey 신설 시 매트릭스 행이 늘어나는 부작용 회피.)
+- **이유**: §5 역할 계층(admin>manager>leader>rep)을 계정 운영 권한에도 반영. "동급·상위 관리 불가, 본인 역할 변경 불가" 로 권한 상승·자기잠금을 차단. admin 은 슈퍼관리자로 전원 관리(D35/자기잠금 방지와 일관).
+- **영향**: 프리뷰 E2E 검증 — admin=5명 전원+권한관리 노출, 실장=팀장·담당 3명(본인·admin 제외)+역할[팀장·담당]+팀 선택 가능+`/admins/roles` 리다이렉트, 팀장=본인팀 담당 1명만+역할[담당]+팀 1팀 고정, admin 본인 편집 시 역할 잠금. `tsc --noEmit`·`vite build`(3595 모듈) 통과, 콘솔 에러 없음. **라이브(M단계) 미반영**: 현재 `supa.ts` staff 쓰기는 security-definer RPC 로 admin 전용이라, 실장·팀장 위임을 라이브에서 살리려면 `supabase/migrations/0002_rls.sql` 에 동일 계층(상위→하위, 팀장=팀 스코프) staff write 정책 추가가 필요 → `TODO(live-verify)` 로 표시, dataSource=mock 유지(M8 게이트).
+
+## 2026-06-04 · 정의현 차장 현장 피드백 v0.2 (입력/배분·초기화·고정제외·문자)
+
+> 현장 피드백 4건. "입력/배분이 가장 중요". mock-first 구현 후 M8 라이브에 함께 반영. 항목별 사용자 확정 답변 반영.
+
+### D39. 자동배분 = '자동배분 대상' 플래그 풀 + 실행 시 임시 가감 (지정 담당자만 라운드로빈)
+- **결정**: 기존 자동할당은 *활성 rep 전원* 라운드로빈이라 "지정한 담당자만 자동배분"(차장 요구)이 불가능 → **풀 지정 메커니즘** 도입.
+  - 데이터: `Staff.auto_assign_enabled: boolean` 추가(타입·시드·`0001_schema.sql` staff 컬럼 `default false`). 시드 = rep 2명 true, 그 외 false. `store.ts` DB_VERSION 7→8 로 기존 localStorage 자동 재시드.
+  - 풀 헬퍼(`lib/staff.ts`): `assignableReps()` = 활성 rep **중 플래그 ON** 만(자동배분 기본 풀). `autoAssignCandidates()` = 활성 rep 전체(모달에서 가감용 후보).
+  - 실행(`members/api.ts useAutoAssign`, `members/supa.ts autoAssign`): `staffIds?: string[]` 인자 추가 — 지정 시 그 풀, 없으면 `assignableReps()`. 라운드로빈 후 로그 meta 에 `{count, pool}` 기록.
+  - UI 1(`members/bulk.tsx` 자동할당): ConfirmModal → Modal 로 교체. 활성 rep 체크박스 목록, 기본 풀(플래그 ON)은 사전 체크 + '기본' 칩, 전체/해제, "대상 N명" 카운트. 체크된 staffIds 만 배정 → **이번 실행에 한해 가감**(확정 답변: "기본은 플래그, 실행 시 임시 가감").
+  - UI 2(`admins/AdminsPage.tsx`): 운영자 편집 Drawer 에 rep 한정 '자동배분 대상' 체크박스(`role==='rep'` 일 때만, 비-rep 은 저장 시 false 강제). 목록 역할셀에 풀 멤버는 '자동'(accent) 칩.
+- **이유**: 차장 피드백 "자동으로 배분시에도 지정한 담당자들만 자동배분". 플래그(운영 기본값) + 실행 시 가감(유연성) 2단을 모두 충족. 풀 비면 배정 0(no-op).
+- **영향**: 프리뷰 E2E — v8 재시드(rep1·rep2 플래그 ON), /admins 역할셀 '자동' 칩 표시, 편집 Drawer rep 체크박스 노출. 자동할당 모달에서 담당 최 해제(풀=담당 박 1명) 후 3건 실행 → 신규 assignment 3건 전부 `staff-rep1`, 로그 `{count:3, pool:1}` 확인(rep2 제외 입증). `tsc --noEmit`·`vite build`(3595 모듈) 통과. **라이브 staff 테이블**: 이미 0001 을 적재한 DB 는 컬럼 추가 ALTER 필요(`alter table staff add column auto_assign_enabled boolean not null default false;`) — M8 체크리스트.
+
+### D40. 회원 단건 등록(DB 입력 ①) — useCreateMember + 신규 리드 기본값 + user_id 자동 채번
+- **결정**: `members/api.ts useCreateMember`(+`supa.createMember` 미러) + `MemberCreateDrawer`(rhf+zod). 신규 리드 기본값 = **미배분·무료(free)·정상(active)·미아웃콜(false)**. `user_id`(로그인 ID)는 기존 `pl####` 최대값+1 자동 채번. 담당자 지정 시 manual `assignment` 동반 생성. **전화 중복 허용**(차장 확정) + `meta.dup_phone` 로 표시. MembersPage 헤더에 '신규 등록' 버튼(rep 제외 노출 — DB 입력은 관리 기능).
+- **이유**: 차장 "DB 입력" 핵심. 기존엔 회원 생성 경로 자체가 없었음(조회 전용) → 단건 입력 신설. 중복은 허용(차장 확정, V2-3 임포트와 동일 정책).
+- **영향**: 프리뷰 E2E — 등록 시 회원 160→161, 신규 행이 최상단(최신가입), **오늘가입 카운트 8→9 즉시 반영(§8)**, manual assignment 1건 + `member.create` 로그(dup:false). `tsc`·`vite build`(3595 모듈) 통과. 라이브도 동일(`supa.createMember`).
+
+### D41. 엑셀/CSV 일괄 임포트(DB 입력 ②) — SheetJS 파싱 + 자동 컬럼매핑 + 중복표시 + 청크 insert
+- **결정**: `members/import.ts`(`parseLeadFile`: CSV 는 UTF-8/EUC-KR 디코드 후 `type:'string'`, 엑셀은 `type:'array'`; `autoMapHeaders` 키워드 자동매핑) + `ImportMembersModal`(업로드→컬럼매핑→미리보기→결과 4스텝) + `useBulkImportMembers`(+`supa.bulkImportMembers`, 청크 500건). 공통값(유입코드·분류·등급·담당자 일괄)으로 빈 컬럼 보강. 유효성 = **이름·전화 필수**(미충족 행 제외). **전화 중복 허용 + `meta.dup_phone` 표시**(파일 내 + 기존 DB 모두 검사). 단건/일괄 기본값은 `buildLeadMember` 로 단일화.
+- **이유**: 차장 "DB 입력" 핵심(엑셀/CSV 둘 다 + 중복 허용 — 확정). 한국 엑셀 CSV 는 CP949(EUC-KR) 가 많아 **인코딩 폴백 필수** — 브라우저 검증 중 UTF-8 강제읽기로 한글 헤더 mojibake(`ì´ë¦`) 발견·수정.
+- **영향**: 프리뷰 E2E — CSV 5행(유효4·무효1·파일내중복1) 임포트 시 회원 160→164, `박중복`만 `meta.dup_phone`, `이름없음행` 제외, 로그 `{count:4, dup:1}`, **오늘가입·담당미지정 카운트 즉시 반영(§8)**. `tsc`·`vite build` 통과. **보안**: `xlsx@0.18.5` 는 알려진 CVE(prototype pollution 등) 존재 → 내부 신뢰 업로드 한정으로 수용, 프로덕션 강화 시 패치 SheetJS 빌드로 교체(코드 TODO + ASSUMPTIONS 기록).
+
+### D42. 문자 실발송 = OneShot/SMTNT(msgagent) REST 연동 — Edge Function 프록시 + 설정 토글
+- **결정**: 매뉴얼(Agent2 Webshot REST V2.6.4) 기준. 단건 발송 `POST https://api2.msgagent.com/api/webshot/send/general/{msgType}/{id}`(multipart/form-data; id·dest_phone·send_phone·msg_body[·subject]). **인증 = 요청 IP/도메인 화이트리스트, API 키 없음**(웹패널 PW 는 API 에 미사용). 구현:
+  - `supabase/functions/send-sms/index.ts`(Deno Edge Function) — multipart 구성·OneShot 호출·result_code/cmid 파싱. ONESHOT_ID/SEND_PHONE 은 함수 시크릿.
+  - `src/lib/oneshot.ts` — SMS(≤90byte)/LMS 자동분류(`koByteLength`), 결과코드·전송결과 맵, `supabase.functions.invoke('send-sms')` 어댑터.
+  - `SmsSettings` 확장: `oneshot_enabled`(실발송 토글)·`ad_optout`(무료거부 번호). `sender_no`=발신번호, `smtnt_id`=OneShot 아이디, `smtnt_key`=미사용(키 없음). 설정 '문자 설정' 카드 갱신.
+  - `useSendSms`: `oneshot_enabled && supabase && sender_no` 일 때 수신자별 `sendOneShot` 실발송(상태=성공/실패), 아니면 기존 mock 기록. 마케팅 문자는 `ad_optout` 있으면 본문에 `(광고)`+무료거부 자동표기.
+- **이유**: 차장 "이 업체로 문자전송 연결". IP 화이트리스트 + CORS 로 브라우저 직접 호출 불가 → 서버 경유 필수. 키가 없어 site_settings 노출 우려도 없음(아이디·발신번호는 비밀 아님).
+- **영향**: `tsc`·`build` 통과. xlsx 를 정적→**동적 import**로 바꿔 메인 번들 433KB 유지(xlsx 429KB 별도 lazy 청크, 500KB 경고 해소). 설정 카드 OneShot 필드 4종 렌더, mock 발송 정상(`real:false`). **실발송은 고의 미실행**(비용+발신동작=운영자 승인 필요). **라이브 게이트(운영자)**: ① `supabase functions deploy send-sms` ② `ONESHOT_ID`/`ONESHOT_SEND_PHONE` 시크릿 ③ **호출 서버 IP/도메인을 OneShot 에 등록** — 서버리스 egress IP 는 가변이라 도메인 등록 또는 정적 IP 프록시 필요(차장↔OneShot 확인) ④ 발신번호 사전등록 ⑤ 설정 실발송 ON + 테스트 1건. msgType path 값(`SMS` 문자열 vs `4`)은 첫 테스트로 확인(실패 시 1줄 교체).
+
+### D43. DB 초기화(재사용) — 신규 리드 상태 완전 리셋 + 콜메모 소프트삭제(admin 전용) + 결제 보존
+- **결정**: `useResetMembers`(+`supa.resetMembers`) — 선택 회원을 입력 시점 상태로 되돌린다: 등급→무료·상태→정상·담당/팀 해제·아웃콜/성향/최근접속/상태플래그 초기화. **콜메모(`member.memo`)는 소프트삭제 → `meta.reset_memos[]`(body·archived_at·reset_by)로 보존**하고, 회원 상세 메모탭에서 **최고관리자(admin)만 '초기화로 삭제된 콜메모'로 열람**. 결제행은 물리삭제 금지(감사 보존). 배정해제 이력 + `member.reset_db` 로그. `bulk.tsx` 'DB초기화' 위험 액션(ConfirmModal, tone=danger).
+- **이유**: 차장 "한번 쓴 DB 를 1~2일 후 재사용, 입력 시점 상태로 초기화" + "최고관리자는 삭제된 메모도 열람"(확정: 옵션3 완전초기화 + 콜메모 admin 한정). 결제는 금전·감사 기록이라 회원이 신규로 돌아가도 행은 보존(비가역 삭제 회피).
+- **영향**: 프리뷰 E2E — `m_1004`(골드·팀장배정·메모 '관심 높음'·결제 1건) 초기화 시 → 무료·미배분·성향 null·메모 null, `reset_memos=[{body:'관심 높음', reset_by:'staff-admin'}]`, **결제 1건 보존**, 로그 `{count:1}`, 확인모달 문구·결제내역 탭 보존 확인. `tsc`·`build` 통과. 드로어 메모탭의 admin 전용 표시는 Drawer 가 `createPortal(document.body)`라 **자동 클릭이 React 합성이벤트를 못 타** 미검증(실사용 정상) — JSX 가드(`role==='admin' && reset_memos.length`)와 데이터로 검증.
+
+### D44. 고정/제외 효력일자 + 회차별 이력 — 토요일 입력→익주 월요일 적용, 활성 규칙만 추천 반영
+- **결정**: `site_settings.lotto_exclude_history[]`(`LottoExcludeRule`: round_no·fixed·excluded·effective_from·created_at·created_by). `LottoExcludePage` 를 즉시저장형 → **회차 예약형**으로 개편: 적용회차(기본 최신+1) · 적용시작일(기본 **익주 월요일**) + 1~45 그리드 + '이력에 추가' + **회차별 이력 테이블**(상태=예정/적용중/이전). `useLottoExclude`(lotto/api) `select` 가 **effective_from<=오늘 중 최신(활성)** 규칙을 추천 생성에 적용, 없으면 레거시 `lotto_exclude` 폴백. 저장 시 `lotto_exclude` 를 활성 스냅샷으로 동기화. `DB_VERSION` 8→9 재시드(시드 이력 2건).
+- **이유**: 차장 "매주 토요일 입력 → 익주 월요일 적용 + 회차별 이력 리스트". 효력일자로 미래 규칙은 '예정' 대기, 날짜 도달 시 자동 활성(별도 배치 불요).
+- **영향**: 프리뷰 E2E — v9 재시드(1179 이전·1180 적용중), 1181 추가 시 `effective_from=2026-06-08`(익주 월요일)·상태 **예정**, **활성 스냅샷은 1180 유지**(미래 규칙 미적용), 이력 테이블 예정/적용중/이전 3상태 정확. `useLottoExclude` 활성=1180(fixed[7]) 확인. `tsc`·`build` 통과. 자정 경과 시 활성 갱신은 settings 쿼리 리패치 시점에 반영(데일리 운영툴 허용). 라이브: site_settings jsonb 에 history 포함(M8). **TODO(live-verify)**: 토요일 입력 요일 락 여부·실 회차번호 자동매핑(현재 수동, 기본 최신+1).
+
+### D45. 문자 발송 호스팅 = Edge Function → Vercel 함수 + 고정 IP 프록시 (OneShot IP 화이트리스트 대응)
+- **결정**: SMTNT 회신 — OneShot 인증은 **요청 IP/도메인 화이트리스트**(도메인 우선→안되면 고정 IP). 서버리스 가변 egress 로는 통과 불가 → **고정 IP 프록시(옵션 A)** 채택. 호스팅을 Supabase Edge Function(Deno, 프록시 지원 불확실)에서 **Vercel 서버리스 함수 `api/send-sms`(Node + `undici` ProxyAgent)**로 전환. 클라이언트 `lib/oneshot.ts` 는 `supabase.functions.invoke` → `fetch('/api/send-sms')`. `useSendSms` 실발송 게이트도 `!!supabase` 제거(=`oneshot_enabled && sender_no`). env: `ONESHOT_ID`·`ONESHOT_SEND_PHONE`·`PROXY_URL`(고정IP)·`ONESHOT_RESELLER`(특부가만).
+- **이유**: Node 의 프록시 지원이 확실하고 앱이 이미 Vercel. 프록시의 **고정 IP 1개만 OneShot 에 등록**하면 서버리스에서도 발송 가능. (브라우저 직접 호출은 IP/CORS 로 불가, 키는 애초에 없음.)
+- **영향**: `supabase/functions/send-sms` 제거, `undici` 의존성 추가(api/ 전용 — Vite 앱 번들 미포함, tsconfig include=src 밖이라 앱 tsc 무영향). `tsc`·`build` 통과. 발신번호 = **1522-6385(`15226385`)** OneShot 등록 확인(사용가능). **미검증(고의)**: 프록시 IP 확보·OneShot 등록·실발송은 비용+발신동작이라 운영자 절차 후. 게이트: ① 고정IP 프록시 가입→`PROXY_URL`·고정IP ② 그 IP 를 OneShot 에 등록(1566-6639) ③ 특부가 여부(아니면 resellerCode 생략) ④ Vercel env 설정 ⑤ 배포 + 설정 실발송 ON + 테스트 1건. 참고: 가능하면 KR/아시아 IP 프록시 권장(지연·차단 리스크↓), 여의치 않으면 KR VPS(옵션 B) 폴백.
+- **✅ 실발송 검증 완료(2026-06-05)**: Fixie(Vercel Marketplace 통합, US-East, Tricycle 무료) 고정 IP 2개(`52.5.155.132`·`52.87.82.133`)를 OneShot(`lotto_dream_api`)에 등록 → `vercel --prod` 배포 → `POST /api/send-sms` curl 테스트 결과 `result_code:0, cmid:84489887` + **실제 단말 수신 확인**. `FIXIE_URL` 은 Fixie-Vercel 통합이 자동 주입(수동 env 불필요). 발신번호 `15226385`(env `ONESHOT_SEND_PHONE`). 운영 한도: Fixie 무료 500건/월(현 사용량 월 246건) — 발송 늘면 유료 전환. IP 화이트리스트는 additive(기존 발송 무영향).

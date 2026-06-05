@@ -4,10 +4,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { LogEntry, Role, Staff } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
 import { useCurrentUser } from '@/lib/auth'
 import { staffKeys } from '@/lib/staff'
+import * as supa from './supa'
 import { navAccessKeys } from '@/lib/navAccess'
-import type { NavAccessMap } from '@/lib/permissions'
+import { assignableRoles, canManageStaff, type NavAccessMap } from '@/lib/permissions'
 
 function adminLog(
   actor: string | null,
@@ -34,6 +36,7 @@ export interface StaffInput {
   role: Role
   team_id: string | null
   is_active: boolean
+  auto_assign_enabled: boolean // 자동배분 대상 풀 포함(rep 한정, §V2-1)
 }
 
 /** 운영자 계정 생성/수정. login_id 중복은 거부(throw)한다. */
@@ -42,6 +45,18 @@ export function useSaveStaff() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { id?: string; input: StaffInput }) => {
+      if (dataSource === 'supabase') return supa.saveStaff(v, user?.id ?? null)
+      // 계층 위임 가드(§5) — mock 검증. TODO(live-verify): live 는 RLS 로 동일 계층 가드 적용(M단계).
+      if (!user) throw new Error('로그인이 필요합니다.')
+      if (!assignableRoles(user.role).includes(v.input.role))
+        throw new Error('이 역할을 부여할 권한이 없습니다.')
+      if (v.id) {
+        const target = readDb().staff.find((s) => s.id === v.id)
+        if (!target) throw new Error('대상 계정을 찾을 수 없습니다.')
+        if (!canManageStaff(user, target)) throw new Error('이 계정을 수정할 권한이 없습니다.')
+        if (v.id === user.id && v.input.role !== target.role)
+          throw new Error('본인 역할은 변경할 수 없습니다.')
+      }
       const login = v.input.login_id.trim()
       const dup = readDb().staff.find(
         (s) => s.login_id.toLowerCase() === login.toLowerCase() && s.id !== v.id,
@@ -55,10 +70,10 @@ export function useSaveStaff() {
         if (v.id) {
           const s = db.staff.find((x) => x.id === v.id)
           if (!s) return
-          Object.assign(s, { name, login_id: login, role: v.input.role, team_id, is_active: v.input.is_active })
+          Object.assign(s, { name, login_id: login, role: v.input.role, team_id, is_active: v.input.is_active, auto_assign_enabled: v.input.auto_assign_enabled })
           db.logs.push(adminLog(user?.id ?? null, 'staff.update', 'staff', v.id, { name, role: v.input.role }))
         } else {
-          const s: Staff = { id, login_id: login, name, role: v.input.role, team_id, is_active: v.input.is_active, last_login_at: null }
+          const s: Staff = { id, login_id: login, name, role: v.input.role, team_id, is_active: v.input.is_active, auto_assign_enabled: v.input.auto_assign_enabled, last_login_at: null }
           db.staff.push(s)
           db.logs.push(adminLog(user?.id ?? null, 'staff.create', 'staff', id, { name, role: v.input.role, login_id: login }))
         }
@@ -75,6 +90,13 @@ export function useToggleStaffActive() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { id: string; active: boolean }) => {
+      if (dataSource === 'supabase') return supa.toggleStaffActive(v.id, v.active, user?.id ?? null)
+      // 계층 위임 가드(§5) — 본인·관리 불가 대상은 토글 거부.
+      if (!user) throw new Error('로그인이 필요합니다.')
+      if (v.id === user.id) throw new Error('본인 계정은 변경할 수 없습니다.')
+      const target = readDb().staff.find((s) => s.id === v.id)
+      if (!target) throw new Error('대상 계정을 찾을 수 없습니다.')
+      if (!canManageStaff(user, target)) throw new Error('이 계정을 변경할 권한이 없습니다.')
       mutateDb((db) => {
         const s = db.staff.find((x) => x.id === v.id)
         if (!s) return
@@ -93,6 +115,7 @@ export function useSaveNavAccess() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (map: NavAccessMap) => {
+      if (dataSource === 'supabase') return supa.saveNavAccess(map, user?.id ?? null)
       const next: NavAccessMap = {}
       for (const [k, v] of Object.entries(map)) next[k] = [...v]
       mutateDb((db) => {

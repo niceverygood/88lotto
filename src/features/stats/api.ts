@@ -6,6 +6,8 @@ import { useQuery } from '@tanstack/react-query'
 import { eachDayOfInterval, format, parseISO } from 'date-fns'
 import type { Grade, Member, Payment, PaymentStatus } from '@/types/db'
 import { readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 import { useCurrentUser, type CurrentUser } from '@/lib/auth'
 import { GRADE_LABEL, PAYMENT_METHOD_LABEL } from '@/design-system/labels'
 
@@ -277,8 +279,9 @@ export function useStats(q: StatsQuery) {
   const user = useCurrentUser()
   return useQuery({
     queryKey: ['stats', q.view, q.from, q.to, user?.id ?? 'anon', user?.role ?? 'none'],
-    queryFn: (): StatsResult => {
-      const db = readDb()
+    queryFn: async (): Promise<StatsResult> => {
+      const db =
+        dataSource === 'supabase' ? await fetchTables(['members', 'payments', 'products']) : readDb()
       const members = scopeMembers(db.members, user)
       if (q.view === 'signup') return signupStats(members, q.from, q.to)
       if (q.view === 'inflow') return inflowStats(members, q.from, q.to)

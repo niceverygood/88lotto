@@ -44,7 +44,10 @@ export interface DbShape {
 
 const DB_KEY = 'pluslotto-db'
 // 시드 구조가 바뀌면 올린다 → 기존 localStorage 가 자동 재시드된다.
-const DB_VERSION = 6
+// v7: 계정관리 계층 위임(§5) — nav_access.admins 기본값에 manager·leader 추가.
+// v8: 자동배분 대상 풀(§V2-1) — staff.auto_assign_enabled 추가.
+// v9: 고정/제외 회차별 이력(§V2-5) — site_settings.lotto_exclude_history 추가.
+const DB_VERSION = 9
 
 interface Persisted {
   __v: number

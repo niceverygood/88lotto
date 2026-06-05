@@ -2,11 +2,14 @@
 // 회차/베팅은 전역 데이터(역할 스코프 없음). '당첨 확정'은 회차 베팅의 등수/당첨금을 산정하고
 // 1~3등 당첨자의 win_history 를 갱신(§8 당첨자 세그먼트) → lotto/bets/members 쿼리 무효화.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Bet, LogEntry, LottoRound } from '@/types/db'
+import type { Bet, LogEntry, LottoExcludeSettings, LottoRound } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchSiteSettings, fetchTables } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
-import { betKeys, lottoKeys, memberKeys } from '@/lib/queryKeys'
+import { betKeys, lottoKeys, memberKeys, settingsKeys } from '@/lib/queryKeys'
 import { gradeRank, lottoSum, oddEven, prizeForRank } from '@/lib/lotto'
+import * as supa from './supa'
 
 export interface RoundRow extends LottoRound {
   betCount: number
@@ -32,8 +35,9 @@ function aggregateBets(bets: readonly Bet[]): Map<number, { count: number; winne
 export function useRounds(filter: RoundFilter = 'all') {
   return useQuery({
     queryKey: lottoKeys.rounds({ filter }),
-    queryFn: (): RoundRow[] => {
-      const db = readDb()
+    queryFn: async (): Promise<RoundRow[]> => {
+      const db =
+        dataSource === 'supabase' ? await fetchTables(['bets', 'lotto_rounds']) : readDb()
       const agg = aggregateBets(db.bets)
       let rows = db.lotto_rounds.map((r): RoundRow => {
         const a = agg.get(r.round_no)
@@ -49,6 +53,32 @@ export function useRounds(filter: RoundFilter = 'all') {
       return rows.sort((a, b) => b.round_no - a.round_no)
     },
     placeholderData: (prev) => prev,
+  })
+}
+
+/**
+ * 추천 생성기용 수동 고정·제외 설정. settings 페이지의 useSiteSettings 와 동일 쿼리 키를
+ * 공유하므로(설정 캐시 재사용) 설정 편집이 추천 화면에 즉시 반영된다(§2 feature 간 import 회피).
+ */
+// 활성 고정/제외 규칙 = effective_from <= 오늘 중 가장 최근(§V2-5). 없으면 null → 레거시 lotto_exclude 폴백.
+function activeExcludeRule(
+  history: readonly { effective_from: string; fixed: number[]; excluded: number[] }[],
+): LottoExcludeSettings | null {
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const applicable = [...history]
+    .filter((r) => r.effective_from <= today)
+    .sort((a, b) => b.effective_from.localeCompare(a.effective_from))
+  return applicable[0] ? { fixed: applicable[0].fixed, excluded: applicable[0].excluded } : null
+}
+
+export function useLottoExclude() {
+  return useQuery({
+    queryKey: settingsKeys.site(),
+    queryFn: async () =>
+      dataSource === 'supabase' ? await fetchSiteSettings() : readDb().site_settings,
+    // §V2-5: 효력일자 기준 활성 규칙을 추천 생성에 적용(없으면 레거시 스냅샷).
+    select: (s): LottoExcludeSettings => activeExcludeRule(s.lotto_exclude_history ?? []) ?? s.lotto_exclude,
   })
 }
 
@@ -74,6 +104,7 @@ export function useConfirmRound() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { roundNo: number }) => {
+      if (dataSource === 'supabase') return supa.confirmRound(v.roundNo, user?.id ?? null)
       mutateDb((db) => {
         const round = db.lotto_rounds.find((r) => r.round_no === v.roundNo)
         if (!round) return
@@ -124,6 +155,7 @@ export function useRegisterRound() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: RegisterRoundInput): Promise<RegisterResult> => {
+      if (dataSource === 'supabase') return supa.registerRound(v, user?.id ?? null)
       let result: RegisterResult = { ok: true }
       mutateDb((db) => {
         if (db.lotto_rounds.some((r) => r.round_no === v.round_no)) {

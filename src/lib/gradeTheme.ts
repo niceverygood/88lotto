@@ -6,6 +6,8 @@ import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Grade, GradeColorMap } from '@/types/db'
 import { readDb } from './db/store'
+import { dataSource } from './supabase'
+import { fetchSiteSettings } from './db/remote'
 import { settingsKeys } from './queryKeys'
 
 // Grade 키가 곧 토큰 접미사(--g-free, --g-gold …)와 1:1 이므로 별도 매핑 불필요.
@@ -28,7 +30,8 @@ export function applyGradeColors(colors: GradeColorMap): void {
 export function useGradeColorSync(): void {
   const { data } = useQuery({
     queryKey: settingsKeys.site(),
-    queryFn: () => readDb().site_settings,
+    queryFn: async () =>
+      dataSource === 'supabase' ? await fetchSiteSettings() : readDb().site_settings,
   })
   useEffect(() => {
     if (data) applyGradeColors(data.grade_colors)

@@ -44,13 +44,14 @@ const NAV: NavGroup[] = [
     title: '로또',
     items: [
       { key: 'lotto', label: '로또기록', to: '/lotto/results' },
+      { key: 'lotto', label: '추천번호', to: '/lotto/recommend' },
       { key: 'bets', label: '베팅', to: '/bets' },
     ],
   },
   {
     title: '시스템',
     items: [
-      { key: 'admins', label: '관리자', to: '/admins', adminOnly: true },
+      { key: 'admins', label: '관리자', to: '/admins' },
       { key: 'logs', label: '로그', to: '/logs/admin', adminOnly: true },
       { key: 'stats', label: '통계', to: '/stats' },
       { key: 'settings', label: '설정', to: '/settings' },
@@ -88,7 +89,10 @@ export function AppShell() {
   return (
     <div
       className="grid h-screen overflow-hidden bg-white text-[13px]"
-      style={{ gridTemplateColumns: `${collapsed ? 64 : 248}px 1fr` }}
+      style={{
+        gridTemplateColumns: `${collapsed ? 64 : 248}px 1fr`,
+        gridTemplateRows: 'minmax(0, 1fr)',
+      }}
     >
       {/* ── 사이드바 ───────────────────────────── */}
       <aside className="flex flex-col overflow-y-auto bg-[color:var(--nav-bg)] py-3.5 text-white">
@@ -115,7 +119,7 @@ export function AppShell() {
                 const count = navCounts[item.key]
                 return (
                   <NavLink
-                    key={item.key}
+                    key={item.to}
                     to={item.to}
                     title={collapsed ? item.label : undefined}
                     className={({ isActive }) =>
@@ -200,7 +204,7 @@ export function AppShell() {
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-auto bg-gray-50 p-4">
+        <main className="relative min-h-0 flex-1 overflow-auto bg-gray-50 p-4">
           <Outlet />
         </main>
       </div>

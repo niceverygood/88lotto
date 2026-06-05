@@ -4,8 +4,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CampaignEvent, LogEntry, Notice } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
 import { communityKeys, supportKeys } from '@/lib/queryKeys'
+import * as supa from './supa'
 
 export { communityKeys }
 
@@ -41,8 +44,9 @@ export function useNotices(opts: { includeUnpublished?: boolean } = {}) {
   const { includeUnpublished = true } = opts
   return useQuery({
     queryKey: communityKeys.notices({ includeUnpublished }),
-    queryFn: (): Notice[] => {
-      const rows = readDb().notices.filter((n) => includeUnpublished || n.published)
+    queryFn: async (): Promise<Notice[]> => {
+      const db = dataSource === 'supabase' ? await fetchTables(['notices']) : readDb()
+      const rows = db.notices.filter((n) => includeUnpublished || n.published)
       return sortNotices(rows)
     },
   })
@@ -61,6 +65,7 @@ export function useSaveNotice() {
   return useMutation({
     // id 있으면 수정, 없으면 신규.
     mutationFn: async (v: { id?: string; input: NoticeInput }) => {
+      if (dataSource === 'supabase') return supa.saveNotice(v, user?.id ?? null)
       const ts = nowIso()
       let id = v.id ?? genId('ntc')
       mutateDb((db) => {
@@ -96,6 +101,7 @@ export function useDeleteNotice() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
+      if (dataSource === 'supabase') return supa.deleteNotice(id, user?.id ?? null)
       mutateDb((db) => {
         const idx = db.notices.findIndex((x) => x.id === id)
         if (idx === -1) return
@@ -116,9 +122,9 @@ export function useEvents(opts: { includeUnpublished?: boolean } = {}) {
   const { includeUnpublished = true } = opts
   return useQuery({
     queryKey: communityKeys.events({ includeUnpublished }),
-    queryFn: (): CampaignEvent[] =>
-      readDb()
-        .events.filter((e) => includeUnpublished || e.published)
+    queryFn: async (): Promise<CampaignEvent[]> =>
+      (dataSource === 'supabase' ? await fetchTables(['events']) : readDb()).events
+        .filter((e) => includeUnpublished || e.published)
         .sort((a, b) => b.created_at.localeCompare(a.created_at)),
   })
 }
@@ -136,6 +142,7 @@ export function useSaveEvent() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { id?: string; input: EventInput }) => {
+      if (dataSource === 'supabase') return supa.saveEvent(v, user?.id ?? null)
       const ts = nowIso()
       const id = v.id ?? genId('evt')
       mutateDb((db) => {
@@ -168,6 +175,7 @@ export function useDeleteEvent() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
+      if (dataSource === 'supabase') return supa.deleteEvent(id, user?.id ?? null)
       mutateDb((db) => {
         const idx = db.events.findIndex((x) => x.id === id)
         if (idx === -1) return

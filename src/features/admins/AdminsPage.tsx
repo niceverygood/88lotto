@@ -12,7 +12,7 @@ import { usePageMeta } from '@/app/uiStore'
 import { useCurrentUser } from '@/lib/auth'
 import { useStaff, useTeams } from '@/lib/staff'
 import { datetime } from '@/lib/format'
-import { ROLE_LABEL, ROLE_ORDER } from '@/lib/permissions'
+import { assignableRoles, canManageStaff, ROLE_LABEL, ROLE_ORDER } from '@/lib/permissions'
 import type { Role, Staff } from '@/types/db'
 import { useSaveStaff, useToggleStaffActive, type StaffInput } from './api'
 
@@ -52,9 +52,10 @@ export function AdminsPage() {
   const [deactivate, setDeactivate] = useState<Staff | null>(null)
 
   const toggle = useToggleStaffActive()
-  const sorted = [...staff].sort(
-    (a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.name.localeCompare(b.name),
-  )
+  // 계층 위임(§5): 본인이 관리 가능한 하위 직원만 노출. admin 은 canManageStaff 가 전원 true.
+  const visible = [...staff]
+    .filter((s) => canManageStaff(me, s))
+    .sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.name.localeCompare(b.name))
 
   const onToggle = (s: Staff) => {
     if (s.is_active) setDeactivate(s)
@@ -68,9 +69,11 @@ export function AdminsPage() {
         description="운영자 계정을 생성·수정하고 권한 매트릭스를 관리합니다."
         actions={
           <>
-            <Button variant="sec" size="sm" onClick={() => navigate('/admins/roles')}>
-              <ShieldCheck className="h-4 w-4" /> 권한관리
-            </Button>
+            {me?.role === 'admin' && (
+              <Button variant="sec" size="sm" onClick={() => navigate('/admins/roles')}>
+                <ShieldCheck className="h-4 w-4" /> 권한관리
+              </Button>
+            )}
             <Button variant="pri" size="sm" onClick={() => setEdit('new')}>
               <Plus className="h-4 w-4" /> 새 계정
             </Button>
@@ -83,15 +86,15 @@ export function AdminsPage() {
           <div className="p-4">
             <SkeletonRows rows={5} cols={6} />
           </div>
-        ) : sorted.length === 0 ? (
-          <EmptyState icon={<UserPlus className="h-6 w-6" />} title="등록된 운영자가 없습니다" />
+        ) : visible.length === 0 ? (
+          <EmptyState icon={<UserPlus className="h-6 w-6" />} title="관리할 수 있는 운영자가 없습니다" />
         ) : (
           <table className="w-full text-left text-[13px]">
             <thead className="border-b border-gray-100 bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-3 py-2.5">이름</th>
                 <th className="px-2 py-2.5">로그인 ID</th>
-                <th className="w-20 px-2 py-2.5">역할</th>
+                <th className="w-28 px-2 py-2.5">역할</th>
                 <th className="w-24 px-2 py-2.5">팀</th>
                 <th className="w-20 px-2 py-2.5">상태</th>
                 <th className="w-40 px-2 py-2.5 text-right">마지막 로그인</th>
@@ -99,7 +102,7 @@ export function AdminsPage() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((s) => {
+              {visible.map((s) => {
                 const isMe = s.id === me?.id
                 return (
                   <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50/60">
@@ -109,7 +112,14 @@ export function AdminsPage() {
                     </td>
                     <td className="px-2 py-2.5 font-mono text-[12px] text-gray-600">{s.login_id}</td>
                     <td className="px-2 py-2.5">
-                      <RoleChip role={s.role} />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <RoleChip role={s.role} />
+                        {s.role === 'rep' && s.auto_assign_enabled && (
+                          <span className="whitespace-nowrap rounded bg-accent-50 px-1.5 py-0.5 text-[10px] font-semibold text-accent-600">
+                            자동
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-2.5 text-[12px] text-gray-600">{teamName(s.team_id)}</td>
                     <td className="px-2 py-2.5">
@@ -180,13 +190,20 @@ const staffSchema = z.object({
   role: z.enum(['admin', 'manager', 'leader', 'rep']),
   team_id: z.string(),
   is_active: z.boolean(),
+  auto_assign_enabled: z.boolean(),
 })
 type StaffForm = z.infer<typeof staffSchema>
 
 function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => void }) {
   const save = useSaveStaff()
+  const me = useCurrentUser()
   const { data: teams = [] } = useTeams()
   const [serverErr, setServerErr] = useState<string | null>(null)
+
+  // 계층 위임(§5): 부여 가능한 역할로 제한. 본인 역할은 변경 불가. 팀장은 본인 팀으로 고정.
+  const roleOptions = assignableRoles(me?.role ?? null)
+  const isSelf = !!staff && staff.id === me?.id
+  const lockTeam = me?.role === 'leader'
 
   const {
     register,
@@ -198,9 +215,10 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
     defaultValues: {
       name: staff?.name ?? '',
       login_id: staff?.login_id ?? '',
-      role: staff?.role ?? 'rep',
-      team_id: staff?.team_id ?? '',
+      role: staff?.role ?? roleOptions[roleOptions.length - 1] ?? 'rep',
+      team_id: staff?.team_id ?? (lockTeam ? (me?.teamId ?? '') : ''),
       is_active: staff?.is_active ?? true,
+      auto_assign_enabled: staff?.auto_assign_enabled ?? false,
     },
   })
 
@@ -213,6 +231,7 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
       role: v.role,
       team_id: v.role === 'admin' ? null : v.team_id || null,
       is_active: v.is_active,
+      auto_assign_enabled: v.role === 'rep' ? v.auto_assign_enabled : false,
     }
     save.mutate(
       { id: staff?.id, input },
@@ -251,17 +270,18 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>역할</label>
-            <select className={inputCls} {...register('role')}>
-              {ROLE_ORDER.map((r) => (
+            <select className={inputCls} disabled={isSelf} {...register('role')}>
+              {roleOptions.map((r) => (
                 <option key={r} value={r}>
                   {ROLE_LABEL[r]}
                 </option>
               ))}
             </select>
+            {isSelf && <p className="mt-1 text-[11.5px] text-gray-400">본인 역할은 변경할 수 없습니다.</p>}
           </div>
           <div>
             <label className={labelCls}>팀</label>
-            <select className={inputCls} disabled={role === 'admin'} {...register('team_id')}>
+            <select className={inputCls} disabled={role === 'admin' || lockTeam} {...register('team_id')}>
               <option value="">팀 없음</option>
               {teams.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -274,6 +294,12 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
         <label className="flex items-center gap-2 pt-1 text-[13px] text-gray-700">
           <input type="checkbox" {...register('is_active')} /> 활성 계정(체크 해제 시 로그인 불가)
         </label>
+        {role === 'rep' && (
+          <label className="flex items-center gap-2 text-[13px] text-gray-700">
+            <input type="checkbox" {...register('auto_assign_enabled')} /> 자동배분 대상(자동할당
+            라운드로빈 풀에 포함)
+          </label>
+        )}
         <p className="rounded-md bg-gray-50 px-3 py-2 text-[11.5px] leading-relaxed text-gray-500">
           비밀번호는 이 화면에서 설정하지 않습니다. 데모 환경은 로그인 ID 로 인증합니다.
         </p>

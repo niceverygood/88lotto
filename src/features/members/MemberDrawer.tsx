@@ -15,6 +15,7 @@ import {
 import { GRADE_LABEL, PAYMENT_METHOD_LABEL, SMS_TYPE_LABEL } from '@/design-system/labels'
 import { date, datetime, krw, phone } from '@/lib/format'
 import { useStaff, useTeams } from '@/lib/staff'
+import { useRole } from '@/lib/auth'
 import type { Grade } from '@/types/db'
 import {
   useAssignStaff,
@@ -27,6 +28,7 @@ import {
   useSendSms,
   useSmsTemplates,
   useUpdateMember,
+  type ResetMemo,
 } from './api'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
@@ -46,6 +48,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const { data: products = [] } = useProducts()
   const { data: templates = [] } = useSmsTemplates()
 
+  const role = useRole()
   const updateMember = useUpdateMember()
   const assignStaff = useAssignStaff()
   const resetAssign = useResetAssign()
@@ -307,6 +310,30 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
               메모 저장
             </Button>
           </div>
+          {role === 'admin' &&
+            (() => {
+              const archived = (member.meta?.reset_memos as ResetMemo[] | undefined) ?? []
+              if (archived.length === 0) return null
+              return (
+                <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <div className="mb-1.5 text-[12px] font-bold text-gray-600">
+                    초기화로 삭제된 콜메모 · {archived.length}건{' '}
+                    <span className="font-normal text-gray-400">(최고관리자 전용)</span>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {archived
+                      .slice()
+                      .reverse()
+                      .map((a, i) => (
+                        <li key={i} className="flex flex-wrap gap-x-1.5 text-[12.5px]">
+                          <span className="text-gray-800">{a.body}</span>
+                          <span className="text-[11px] text-gray-400">· {datetime(a.archived_at)}</span>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )
+            })()}
         </div>
       )}
 

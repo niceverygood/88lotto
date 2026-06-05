@@ -6,6 +6,8 @@ import { useQuery } from '@tanstack/react-query'
 import { eachDayOfInterval, format, parseISO, subDays } from 'date-fns'
 import type { Grade, Member, Payment } from '@/types/db'
 import { readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 import { useCurrentUser, type CurrentUser } from '@/lib/auth'
 import { PAYMENT_METHOD_LABEL } from '@/design-system/labels'
 
@@ -79,8 +81,8 @@ export function useDashboard() {
   const user = useCurrentUser()
   return useQuery({
     queryKey: ['dashboard', user?.id ?? 'anon', user?.role ?? 'none'],
-    queryFn: (): DashboardResult => {
-      const db = readDb()
+    queryFn: async (): Promise<DashboardResult> => {
+      const db = dataSource === 'supabase' ? await fetchTables(['members', 'payments']) : readDb()
       const members = scopeMembers(db.members, user)
       const memberMap: Record<string, Member> = {}
       for (const m of db.members) memberMap[m.id] = m

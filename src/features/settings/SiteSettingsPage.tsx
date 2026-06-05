@@ -64,6 +64,8 @@ const formSchema = z.object({
     schedule_enabled: z.boolean(),
     schedule_days_before: z.string().regex(/^\d+$/, '0 이상의 숫자'),
     schedule_time: z.string(),
+    oneshot_enabled: z.boolean(),
+    ad_optout: z.string(),
   }),
   win_messages: z.array(z.object({ rank: z.number(), body: z.string().min(1, '문구를 입력하세요.') })),
 })
@@ -89,6 +91,8 @@ function toForm(s: SiteSettings): FormValues {
       schedule_enabled: s.sms.schedule_enabled,
       schedule_days_before: String(s.sms.schedule_days_before),
       schedule_time: s.sms.schedule_time,
+      oneshot_enabled: s.sms.oneshot_enabled ?? false,
+      ad_optout: s.sms.ad_optout ?? '',
     },
     win_messages: s.win_messages.map((w) => ({ rank: w.rank, body: w.body })),
   }
@@ -123,10 +127,13 @@ function toSettings(v: FormValues, prev: SiteSettings): SiteSettings {
       schedule_enabled: v.sms.schedule_enabled,
       schedule_days_before: Number(v.sms.schedule_days_before) || 0,
       schedule_time: v.sms.schedule_time,
+      oneshot_enabled: v.sms.oneshot_enabled,
+      ad_optout: v.sms.ad_optout.trim(),
     },
     win_messages: v.win_messages.map((w) => ({ rank: w.rank, body: w.body })),
     report: prev.report,
     lotto_exclude: prev.lotto_exclude,
+    lotto_exclude_history: prev.lotto_exclude_history,
     terms: prev.terms,
   }
 }
@@ -306,22 +313,32 @@ export function SiteSettingsPage() {
       </SectionCard>
 
       {/* ── 문자 설정 ────────────────────────────────── */}
-      <SectionCard title="문자 설정" desc="발신번호 · 문자 발송 연동(SMTNT) · 추천번호 발송 스케줄.">
+      <SectionCard title="문자 설정" desc="발신번호 · OneShot 실발송 연동 · 추천번호 발송 스케줄.">
         <FieldRow label="발신번호" htmlFor="sender_no">
           <input id="sender_no" className={cn(inputCls, 'max-w-[220px] font-mono')} {...register('sms.sender_no')} />
           {errors.sms?.sender_no && <p className={errCls}>{errors.sms.sender_no.message}</p>}
+          <p className="mt-1 text-[11.5px] text-gray-400">OneShot 에 사전등록된 발신번호여야 발송됩니다.</p>
         </FieldRow>
-        <FieldRow label="SMTNT 계정" htmlFor="smtnt_id">
+        <FieldRow label="OneShot 아이디" htmlFor="smtnt_id">
           <input id="smtnt_id" className={cn(inputCls, 'max-w-[260px]')} {...register('sms.smtnt_id')} />
+          <p className="mt-1 text-[11.5px] text-gray-400">
+            매뉴얼의 사용자 아이디(예: lotto_dream_api). 인증은 API 키가 아니라 서버 IP 화이트리스트입니다.
+          </p>
         </FieldRow>
-        <FieldRow label="SMTNT API 키">
-          <Controller
-            control={control}
-            name="sms.smtntKeyNew"
-            render={({ field: f }) => (
-              <SecretField key={`smtnt-${resetKey}`} stored={settings.sms.smtnt_key} value={f.value} onChange={f.onChange} />
-            )}
-          />
+        <FieldRow label="실발송(OneShot)" align="start">
+          <label className="flex items-center gap-2 text-[13px] text-gray-700">
+            <input type="checkbox" {...register('sms.oneshot_enabled')} /> 실제 문자 발송 사용
+          </label>
+          <p className="mt-1 text-[11.5px] text-warning">
+            끄면 발송 이력만 기록(데모). 켜기 전 발송 함수 배포 + 고정 IP(프록시)를 OneShot 에 등록 + 발신번호
+            설정이 필요합니다. 실발송은 캐쉬가 차감됩니다.
+          </p>
+        </FieldRow>
+        <FieldRow label="무료수신거부 번호" htmlFor="ad_optout">
+          <input id="ad_optout" className={cn(inputCls, 'max-w-[220px] font-mono')} {...register('sms.ad_optout')} />
+          <p className="mt-1 text-[11.5px] text-gray-400">
+            광고성(마케팅) 문자 발송 시 본문에 (광고)와 함께 자동 표기됩니다. 비우면 미표기.
+          </p>
         </FieldRow>
         <FieldRow label="발송 스케줄" align="start">
           <label className="mb-2 flex items-center gap-2 text-[13px] text-gray-700">

@@ -4,8 +4,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Faq, Inquiry, LogEntry, Notice } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
 import { communityKeys, supportKeys } from '@/lib/queryKeys'
+import * as supa from './supa'
 
 function adminLog(
   actor: string | null,
@@ -30,8 +33,10 @@ function adminLog(
 export function useInquiries() {
   return useQuery({
     queryKey: supportKeys.inquiries({}),
-    queryFn: (): Inquiry[] =>
-      [...readDb().inquiries].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    queryFn: async (): Promise<Inquiry[]> =>
+      [...(dataSource === 'supabase' ? await fetchTables(['inquiries']) : readDb()).inquiries].sort(
+        (a, b) => b.created_at.localeCompare(a.created_at),
+      ),
   })
 }
 
@@ -41,6 +46,7 @@ export function useAnswerInquiry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { id: string; answer: string }) => {
+      if (dataSource === 'supabase') return supa.answerInquiry(v.id, v.answer, user?.id ?? null)
       const ts = nowIso()
       mutateDb((db) => {
         const inq = db.inquiries.find((x) => x.id === v.id)
@@ -61,7 +67,10 @@ export function useAnswerInquiry() {
 export function useFaqs() {
   return useQuery({
     queryKey: supportKeys.faqs({}),
-    queryFn: (): Faq[] => [...readDb().faqs].sort((a, b) => a.sort_order - b.sort_order),
+    queryFn: async (): Promise<Faq[]> =>
+      [...(dataSource === 'supabase' ? await fetchTables(['faqs']) : readDb()).faqs].sort(
+        (a, b) => a.sort_order - b.sort_order,
+      ),
   })
 }
 
@@ -78,6 +87,7 @@ export function useSaveFaq() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { id?: string; input: FaqInput }) => {
+      if (dataSource === 'supabase') return supa.saveFaq(v, user?.id ?? null)
       const id = v.id ?? genId('faq')
       mutateDb((db) => {
         if (v.id) {
@@ -101,6 +111,7 @@ export function useDeleteFaq() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
+      if (dataSource === 'supabase') return supa.deleteFaq(id, user?.id ?? null)
       mutateDb((db) => {
         const idx = db.faqs.findIndex((x) => x.id === id)
         if (idx === -1) return
@@ -118,9 +129,9 @@ export function useDeleteFaq() {
 export function useSupportNotices() {
   return useQuery({
     queryKey: communityKeys.notices({ support: true }),
-    queryFn: (): Notice[] =>
-      readDb()
-        .notices.filter((n) => n.published)
+    queryFn: async (): Promise<Notice[]> =>
+      (dataSource === 'supabase' ? await fetchTables(['notices']) : readDb()).notices
+        .filter((n) => n.published)
         .sort((a, b) => {
           if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
           return b.created_at.localeCompare(a.created_at)

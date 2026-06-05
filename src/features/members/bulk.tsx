@@ -1,7 +1,7 @@
 // 이용자 일괄작업 바 (CLAUDE §8). 선택 회원에 상태/유입분류 일괄변경,
 // 담당 배정·자동할당·리셋, 문자 발송을 적용한다. 위험 작업은 확인 모달(§10).
 import { useState } from 'react'
-import { UserPlus, Wand2, MessageSquare, RefreshCw, Tag } from 'lucide-react'
+import { UserPlus, Wand2, MessageSquare, RefreshCw, Tag, Eraser } from 'lucide-react'
 import { BulkButton, ConfirmModal, Modal, Button } from '@/design-system/components'
 import { STATUS_META } from '@/design-system/labels'
 import { useStaff } from '@/lib/staff'
@@ -11,11 +11,12 @@ import {
   useAutoAssign,
   useBulkUpdateMembers,
   useResetAssign,
+  useResetMembers,
   useSendSms,
   useSmsTemplates,
 } from './api'
 
-type BulkModal = 'status' | 'inflow' | 'assign' | 'auto' | 'reset' | 'sms' | null
+type BulkModal = 'status' | 'inflow' | 'assign' | 'auto' | 'reset' | 'resetdb' | 'sms' | null
 
 const STATUS_VALUES: MemberStatus[] = ['active', 'suspended', 'deleted', 'withdrawn']
 // TODO(live-verify): 유입분류 목록은 실 운영 코드 체계로 확정.
@@ -37,6 +38,7 @@ export function MemberBulkActions({
   const [inflowVal, setInflowVal] = useState(INFLOW_TYPES[0])
   const [staffVal, setStaffVal] = useState('')
   const [smsVal, setSmsVal] = useState('')
+  const [autoPool, setAutoPool] = useState<string[]>([]) // 자동배분 실행 시 대상 풀(임시 가감)
 
   const { data: staff = [] } = useStaff()
   const { data: templates = [] } = useSmsTemplates()
@@ -45,6 +47,7 @@ export function MemberBulkActions({
   const assign = useAssignStaff()
   const autoAssign = useAutoAssign()
   const reset = useResetAssign()
+  const resetDb = useResetMembers()
   const sendSms = useSendSms()
 
   const busy =
@@ -52,6 +55,7 @@ export function MemberBulkActions({
     assign.isPending ||
     autoAssign.isPending ||
     reset.isPending ||
+    resetDb.isPending ||
     sendSms.isPending
 
   const close = () => setModal(null)
@@ -70,6 +74,14 @@ export function MemberBulkActions({
     setStaffVal(staff[0]?.id ?? '')
     setModal('assign')
   }
+  // 자동배분 후보 = 활성 rep. 모달 오픈 시 기본 풀('자동배분 대상' 플래그)로 초기화(§V2-1).
+  const reps = staff.filter((s) => s.is_active && s.role === 'rep')
+  const openAuto = () => {
+    setAutoPool(reps.filter((s) => s.auto_assign_enabled).map((s) => s.id))
+    setModal('auto')
+  }
+  const togglePool = (id: string) =>
+    setAutoPool((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
 
   return (
     <>
@@ -82,11 +94,14 @@ export function MemberBulkActions({
       <BulkButton onClick={openAssign}>
         <UserPlus className="h-3.5 w-3.5" /> 담당배정
       </BulkButton>
-      <BulkButton onClick={() => setModal('auto')}>
+      <BulkButton onClick={openAuto}>
         <Wand2 className="h-3.5 w-3.5" /> 자동할당
       </BulkButton>
       <BulkButton onClick={() => setModal('reset')}>
         <RefreshCw className="h-3.5 w-3.5" /> 담당리셋
+      </BulkButton>
+      <BulkButton onClick={() => setModal('resetdb')}>
+        <Eraser className="h-3.5 w-3.5" /> DB초기화
       </BulkButton>
       <BulkButton onClick={openSms}>
         <MessageSquare className="h-3.5 w-3.5" /> 문자발송
@@ -235,16 +250,84 @@ export function MemberBulkActions({
         </p>
       </Modal>
 
-      {/* 자동할당 (확인) */}
-      <ConfirmModal
+      {/* 자동할당 — 대상 풀(기본 플래그 + 실행 시 임시 가감) 후 라운드로빈(§V2-1) */}
+      <Modal
         open={modal === 'auto'}
         onClose={close}
-        onConfirm={() => autoAssign.mutate({ ids: selectedIds }, { onSuccess: done })}
-        title="자동 할당"
-        description={`${n}건을 활성 담당자에게 라운드로빈으로 자동 배정합니다.`}
-        confirmText="자동할당"
-        loading={busy}
-      />
+        title={`자동 할당 · ${n}건`}
+        size="sm"
+        footer={
+          <>
+            <Button variant="sec" size="sm" onClick={close} disabled={busy}>
+              취소
+            </Button>
+            <Button
+              variant="pri"
+              size="sm"
+              disabled={busy || autoPool.length === 0}
+              onClick={() =>
+                autoAssign.mutate({ ids: selectedIds, staffIds: autoPool }, { onSuccess: done })
+              }
+            >
+              자동할당
+            </Button>
+          </>
+        }
+      >
+        <p className="mb-2 text-[12px] leading-relaxed text-gray-500">
+          선택한 <b className="text-gray-700">{n}건</b>을 아래 체크된 담당자에게 라운드로빈으로
+          배정합니다. 기본값은 ‘자동배분 대상’으로 지정된 담당자이며, 이번 실행에 한해 가감할 수 있습니다.
+        </p>
+        {reps.length === 0 ? (
+          <p className="rounded-md bg-gray-50 px-3 py-2 text-[12px] text-gray-500">
+            활성 담당자(rep)가 없습니다. 운영자 관리에서 담당자를 추가하세요.
+          </p>
+        ) : (
+          <>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[12px] font-semibold text-gray-600">
+                대상 담당자 · {autoPool.length}명
+              </span>
+              <div className="flex gap-2 text-[11.5px]">
+                <button
+                  type="button"
+                  className="text-primary-600 hover:underline"
+                  onClick={() => setAutoPool(reps.map((s) => s.id))}
+                >
+                  전체
+                </button>
+                <button
+                  type="button"
+                  className="text-gray-400 hover:underline"
+                  onClick={() => setAutoPool([])}
+                >
+                  해제
+                </button>
+              </div>
+            </div>
+            <div className="max-h-56 space-y-0.5 overflow-y-auto rounded-md border border-gray-200 p-1">
+              {reps.map((s) => (
+                <label
+                  key={s.id}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-gray-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoPool.includes(s.id)}
+                    onChange={() => togglePool(s.id)}
+                  />
+                  <span className="text-gray-700">{s.name}</span>
+                  {s.auto_assign_enabled && (
+                    <span className="ml-auto rounded bg-gray-100 px-1.5 text-[10px] font-semibold text-gray-500">
+                      기본
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </Modal>
 
       {/* 담당리셋 (위험) */}
       <ConfirmModal
@@ -254,6 +337,18 @@ export function MemberBulkActions({
         title="담당 리셋"
         description={`${n}건의 담당자를 미지정으로 되돌립니다. 매출 귀속이 변경될 수 있습니다.`}
         confirmText="담당리셋"
+        tone="danger"
+        loading={busy}
+      />
+
+      {/* DB 초기화 (위험·재사용) */}
+      <ConfirmModal
+        open={modal === 'resetdb'}
+        onClose={close}
+        onConfirm={() => resetDb.mutate({ ids: selectedIds }, { onSuccess: done })}
+        title="DB 초기화 (재사용)"
+        description={`${n}건을 입력 시점(신규 리드) 상태로 초기화합니다. 등급·상태·담당·아웃콜·성향이 리셋되고, 콜메모는 소프트삭제되어 최고관리자만 열람합니다. 결제 이력은 보존됩니다. 되돌릴 수 없습니다.`}
+        confirmText="초기화"
         tone="danger"
         loading={busy}
       />

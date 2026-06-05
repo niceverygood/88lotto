@@ -541,11 +541,13 @@ function buildSiteSettings(): SiteSettings {
     ],
     sms: {
       sender_no: '1588-0000',
-      smtnt_id: 'pluslotto_sms',
-      smtnt_key: 'smtnt_live_3e5f7a9b1c2d4e6f',
+      smtnt_id: 'lotto_dream_api',
+      smtnt_key: '',
       schedule_enabled: true,
       schedule_days_before: 3,
       schedule_time: '10:00',
+      oneshot_enabled: false,
+      ad_optout: '',
     },
     win_messages: [
       { rank: 1, body: '[플러스로또] 축하합니다! $name님 $contents 1등에 당첨되셨습니다. 자세한 안내는 고객센터로 연락드리겠습니다.' },
@@ -563,10 +565,11 @@ function buildSiteSettings(): SiteSettings {
       recipients: ['ops@pluslotto.co.kr'],
       sections: ['revenue', 'signup', 'payment'],
     },
-    lotto_exclude: {
-      fixed: [],
-      excluded: [],
-    },
+    lotto_exclude: { fixed: [7], excluded: [13, 40] },
+    lotto_exclude_history: [
+      { id: 'lxr_1179', round_no: 1179, fixed: [3], excluded: [11, 28], effective_from: '2026-05-18', created_at: '2026-05-16T02:00:00.000Z', created_by: 'staff-admin' },
+      { id: 'lxr_1180', round_no: 1180, fixed: [7], excluded: [13, 40], effective_from: '2026-05-25', created_at: '2026-05-23T02:00:00.000Z', created_by: 'staff-admin' },
+    ],
     terms: [
       '제1조 (목적)',
       '본 약관은 플러스로또(이하 "회사")가 제공하는 로또 번호 추천 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.',
@@ -602,11 +605,11 @@ export function buildSeed(): DbShape {
   const { rounds: lotto_rounds, bets } = genLotto(rng, members)
   const { notices, events, inquiries, faqs } = genContent(rng, now, members)
   const staff: Staff[] = [
-    { id: 'staff-admin', login_id: 'admin01', name: '관리자', role: 'admin', team_id: null, is_active: true, last_login_at: isoOffset(now, 0, 2) },
-    { id: 'staff-manager', login_id: 'two001', name: '실장 김', role: 'manager', team_id: 'team-1', is_active: true, last_login_at: isoOffset(now, 0, 5) },
-    { id: 'staff-leader1', login_id: 'leader01', name: '팀장 이', role: 'leader', team_id: 'team-1', is_active: true, last_login_at: isoOffset(now, 1, 3) },
-    { id: 'staff-rep1', login_id: 'rep01', name: '담당 박', role: 'rep', team_id: 'team-1', is_active: true, last_login_at: isoOffset(now, 0, 8) },
-    { id: 'staff-rep2', login_id: 'rep02', name: '담당 최', role: 'rep', team_id: 'team-2', is_active: true, last_login_at: isoOffset(now, 2, 1) },
+    { id: 'staff-admin', login_id: 'admin01', name: '관리자', role: 'admin', team_id: null, is_active: true, auto_assign_enabled: false, last_login_at: isoOffset(now, 0, 2) },
+    { id: 'staff-manager', login_id: 'two001', name: '실장 김', role: 'manager', team_id: 'team-1', is_active: true, auto_assign_enabled: false, last_login_at: isoOffset(now, 0, 5) },
+    { id: 'staff-leader1', login_id: 'leader01', name: '팀장 이', role: 'leader', team_id: 'team-1', is_active: true, auto_assign_enabled: false, last_login_at: isoOffset(now, 1, 3) },
+    { id: 'staff-rep1', login_id: 'rep01', name: '담당 박', role: 'rep', team_id: 'team-1', is_active: true, auto_assign_enabled: true, last_login_at: isoOffset(now, 0, 8) },
+    { id: 'staff-rep2', login_id: 'rep02', name: '담당 최', role: 'rep', team_id: 'team-2', is_active: true, auto_assign_enabled: true, last_login_at: isoOffset(now, 2, 1) },
   ]
   const logs = genLogs(rng, now, { staff, members, payments, sms_sends })
 

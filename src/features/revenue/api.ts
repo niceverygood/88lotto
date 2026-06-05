@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query'
 import { eachDayOfInterval, format, parseISO } from 'date-fns'
 import type { Member, Payment } from '@/types/db'
 import { readDb } from '@/lib/db/store'
+import { dataSource } from '@/lib/supabase'
+import { fetchTables } from '@/lib/db/remote'
 import { useCurrentUser, type CurrentUser } from '@/lib/auth'
 import { revenueKeys } from '@/lib/queryKeys'
 import { recognitionIso } from '@/lib/revenueRules'
@@ -135,8 +137,11 @@ export function useRevenue(q: RevenueQuery) {
   const user = useCurrentUser()
   return useQuery({
     queryKey: revenueKeys.summary({ ...q, uid: user?.id ?? 'anon', role: user?.role ?? 'none' }),
-    queryFn: (): RevenueResult => {
-      const db = readDb()
+    queryFn: async (): Promise<RevenueResult> => {
+      const db =
+        dataSource === 'supabase'
+          ? await fetchTables(['members', 'staff', 'teams', 'products', 'payments'])
+          : readDb()
       const members = indexMembers(db.members)
       const staffNames: Record<string, string> = {}
       for (const s of db.staff) staffNames[s.id] = s.name

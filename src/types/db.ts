@@ -38,6 +38,7 @@ export interface Staff {
   role: Role
   team_id: string | null
   is_active: boolean
+  auto_assign_enabled: boolean // 자동배분 대상 풀 포함 여부(rep 대상, §V2-1)
   last_login_at: string | null
 }
 
@@ -226,12 +227,14 @@ export interface PgProvider {
 }
 
 export interface SmsSettings {
-  sender_no: string // 발신번호
-  smtnt_id: string // SMTNT 연동 계정
-  smtnt_key: string // SMTNT API 키(시크릿, 마스킹)
+  sender_no: string // 발신번호(OneShot send_phone/CALLBACK — 사전등록 필수)
+  smtnt_id: string // OneShot 사용자 아이디(매뉴얼 id, 예: lotto_dream_api)
+  smtnt_key: string // (미사용) OneShot 은 IP 화이트리스트 인증이라 API 키 없음 — 보존용
   schedule_enabled: boolean
   schedule_days_before: number // 추첨 N일 전 발송
   schedule_time: string // HH:mm
+  oneshot_enabled: boolean // 실발송 사용(OneShot Edge Function 경유) §V2-6
+  ad_optout: string // 광고성 무료수신거부 번호(있으면 마케팅 문자에 (광고)+번호 자동표기)
 }
 
 export interface GradeColor {
@@ -263,6 +266,17 @@ export interface LottoExcludeSettings {
   excluded: number[] // 항상 제외
 }
 
+// 회차별 고정/제외 이력 + 효력일자(§V2-5). 토요일 입력 → 익주 월요일(effective_from)부터 적용.
+export interface LottoExcludeRule {
+  id: string
+  round_no: number
+  fixed: number[]
+  excluded: number[]
+  effective_from: string // YYYY-MM-DD, 이 날짜부터 적용
+  created_at: string
+  created_by: string | null
+}
+
 export interface SiteSettings {
   bank: BankTransferSettings
   grade_colors: GradeColorMap
@@ -270,6 +284,7 @@ export interface SiteSettings {
   sms: SmsSettings
   win_messages: WinMessage[] // 1~5등 당첨문자
   report: ReportSettings
-  lotto_exclude: LottoExcludeSettings
+  lotto_exclude: LottoExcludeSettings // 현재 적용 스냅샷(폴백)
+  lotto_exclude_history: LottoExcludeRule[] // 회차별 이력 + 효력일자(§V2-5)
   terms: string // 이용약관 본문
 }

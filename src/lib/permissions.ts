@@ -48,7 +48,9 @@ export const DEFAULT_NAV_ACCESS: Record<NavKey, Role[]> = {
   support: ['admin', 'manager', 'leader', 'rep'],
   lotto: ['admin', 'manager', 'leader', 'rep'],
   bets: ['admin', 'manager', 'leader', 'rep'],
-  admins: ['admin'],
+  // 계정관리(/admins)는 계층 위임(§5)으로 실장·팀장도 접근 — 본인 하위 직원만 스코프(AdminsPage).
+  // 단, 권한 매트릭스(/admins/roles)는 RolesPage 내부에서 admin 전용으로 별도 가드.
+  admins: ['admin', 'manager', 'leader'],
   logs: ['admin'],
   stats: ['admin', 'manager', 'leader'],
   settings: ['admin', 'manager'],
@@ -65,4 +67,30 @@ export function canAccessWith(map: NavAccessMap | undefined, role: Role | null, 
 /** 정적 폴백 — 기본 매트릭스 기준(맵 미주입 호출용). */
 export function canAccess(role: Role | null, key: NavKey): boolean {
   return canAccessWith(DEFAULT_NAV_ACCESS, role, key)
+}
+
+// ── 계정관리 계층 위임(§5) ────────────────────────────────────────────
+// admin(총괄) > manager(실장) > leader(팀장) > rep(담당자). 상위만 하위를 관리한다.
+// admin 은 전원(자신 포함) 관리·역할부여 가능. 실장은 팀장·담당 전체, 팀장은 본인 팀 담당자만.
+// 동급·상위는 관리 불가, 본인 역할 변경 불가(호출부에서 id 비교로 별도 차단).
+
+/** actor 역할이 생성·부여할 수 있는 역할 목록. admin 은 전원, 그 외는 자신보다 하위만. */
+export function assignableRoles(actor: Role | null): Role[] {
+  if (!actor) return []
+  if (actor === 'admin') return [...ROLE_ORDER]
+  return ROLE_ORDER.slice(ROLE_ORDER.indexOf(actor) + 1)
+}
+
+/** actor(현재 사용자)가 target(직원)을 생성·수정·정지할 수 있는가. */
+export function canManageStaff(
+  actor: { role: Role; id: string; teamId: string | null } | null,
+  target: { role: Role; team_id: string | null },
+): boolean {
+  if (!actor) return false
+  if (actor.role === 'admin') return true
+  // 동급·상위 불가 — 자신보다 하위 역할만.
+  if (ROLE_ORDER.indexOf(actor.role) >= ROLE_ORDER.indexOf(target.role)) return false
+  // 팀장은 본인 팀 소속만.
+  if (actor.role === 'leader') return actor.teamId != null && actor.teamId === target.team_id
+  return true
 }
