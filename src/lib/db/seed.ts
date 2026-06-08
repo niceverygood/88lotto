@@ -48,6 +48,11 @@ function weighted<T>(rng: Rng, pairs: readonly (readonly [T, number])[]): T {
 }
 const isoOffset = (now: number, days: number, hours = 0) =>
   new Date(now - days * 864e5 - hours * 36e5).toISOString()
+function isSameDayMs(aMs: number, bMs: number): boolean {
+  const a = new Date(aMs)
+  const b = new Date(bMs)
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
 function shuffle<T>(rng: Rng, arr: T[]): void {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1))
@@ -59,14 +64,21 @@ const SURNAMES = ['김', '이', '박', '최', '정', '강', '조', '윤', '장',
 const GIVEN = ['민준', '서연', '도윤', '하은', '시우', '지우', '주원', '지호', '하준', '예준', '수아', '지민', '유진', '현우', '준서', '지아', '은우', '다은', '시윤', '채원']
 const TENDENCY = ['적극', '보통', '신중', '무응답'] as const
 const MEMOS = ['상담 거부', '재콜 예정', '관심 높음', '가격 문의', '부재중', '번호 변경 요청']
+// 유입경로(채널) — inflow_code
 const INFLOW = [
-  { code: 'NAVER', type: '네이버검색' },
-  { code: 'FB', type: '페이스북' },
-  { code: 'KAKAO', type: '카카오' },
-  { code: 'TOSS', type: '토스DB' },
-  { code: 'REF', type: '지인추천' },
-  { code: 'BANNER', type: '배너광고' },
+  { code: 'NAVER' },
+  { code: 'FB' },
+  { code: 'KAKAO' },
+  { code: 'TOSS' },
+  { code: 'REF' },
+  { code: 'BANNER' },
 ] as const
+
+// 유입구분(콜 단계) — inflow_type. 현장 피드백(2026-06): 채널명이 아니라 콜 단계로 운영.
+// features/members/views.ts 의 INFLOW_TYPES 와 동일 값(레이어 분리상 시드에 인라인).
+const INFLOW_STAGE_W: readonly (readonly [string, number])[] = [
+  ['신규', 30], ['하루전부재', 22], ['하루전거절', 18], ['이틀전', 16], ['삼일전', 14],
+]
 
 const GRADE_W: readonly (readonly [Grade, number])[] = [
   ['simple', 18], ['free', 34], ['gold', 14], ['goldp', 9], ['vip', 7], ['royal', 4], ['ovr', 3], ['toss', 11],
@@ -115,7 +127,8 @@ function genMembers(rng: Rng, now: number): Member[] {
       status,
       tendency: rng() < 0.8 ? pick(rng, TENDENCY) : null,
       inflow_code: inflow.code,
-      inflow_type: inflow.type,
+      // 유입구분(콜 단계): 오늘 유입은 '신규', 과거 유입은 단계 분포.
+      inflow_type: isToday ? '신규' : weighted(rng, INFLOW_STAGE_W),
       assigned_staff_id: assigned,
       team_id: assigned ? STAFF_TEAM[assigned] : null,
       memo: hasMemo ? pick(rng, MEMOS) : null,
@@ -140,17 +153,21 @@ function genSupport(rng: Rng, members: Member[]) {
   let a = 0
   let s = 0
 
+  const nowMs = Date.now()
   for (const m of members) {
     const regMs = Date.parse(m.registered_at)
-    // 배정 이력
+    // 배정 이력 — 오늘 유입 회원은 오늘 배정으로 기록(관리자 '금일 디비' 집계 시연용).
     if (m.assigned_staff_id) {
+      const regIsToday = isSameDayMs(regMs, nowMs)
       assignments.push({
         id: `as_${++a}`,
         member_id: m.id,
         staff_id: m.assigned_staff_id,
         assigned_by: rng() < 0.5 ? 'staff-manager' : 'staff-admin',
         type: rng() < 0.7 ? 'manual' : 'auto',
-        created_at: new Date(regMs + intIn(rng, 0, 3) * 864e5).toISOString(),
+        created_at: regIsToday
+          ? m.registered_at
+          : new Date(Math.min(regMs + intIn(rng, 0, 3) * 864e5, nowMs)).toISOString(),
       })
     }
     // 결제: 유료 등급은 승인 1건, 그 외 일부는 대기/실패로 변동
@@ -492,7 +509,7 @@ function genLogs(
   // inflow: 유입분류 변경
   for (let i = 0; i < 8; i++) {
     const m = pick(rng, members)
-    push('inflow', pick(rng, ADMIN_ACTORS), 'inflow.update', 'member', m.id, { from: m.inflow_type, to: pick(rng, ['네이버검색', '카카오', '지인추천', '배너광고']) }, intIn(rng, 0, 25))
+    push('inflow', pick(rng, ADMIN_ACTORS), 'inflow.update', 'member', m.id, { from: m.inflow_type, to: pick(rng, ['신규', '하루전부재', '하루전거절', '이틀전', '삼일전']) }, intIn(rng, 0, 25))
   }
 
   // point: 적립/차감 (시스템 자동 적립은 actor=null)
@@ -567,9 +584,12 @@ function buildSiteSettings(): SiteSettings {
     },
     lotto_exclude: { fixed: [7], excluded: [13, 40] },
     lotto_exclude_history: [
-      { id: 'lxr_1179', round_no: 1179, fixed: [3], excluded: [11, 28], effective_from: '2026-05-18', created_at: '2026-05-16T02:00:00.000Z', created_by: 'staff-admin' },
-      { id: 'lxr_1180', round_no: 1180, fixed: [7], excluded: [13, 40], effective_from: '2026-05-25', created_at: '2026-05-23T02:00:00.000Z', created_by: 'staff-admin' },
+      { id: 'lxr_1179', round_no: 1179, grade: null, fixed: [3], excluded: [11, 28], effective_from: '2026-05-18', created_at: '2026-05-16T02:00:00.000Z', created_by: 'staff-admin' },
+      { id: 'lxr_1180', round_no: 1180, grade: null, fixed: [7], excluded: [13, 40], effective_from: '2026-05-25', created_at: '2026-05-23T02:00:00.000Z', created_by: 'staff-admin' },
+      // 등급별 규칙 시연(VIP): 공통과 다른 고정/제외
+      { id: 'lxr_1180_vip', round_no: 1180, grade: 'vip', fixed: [17], excluded: [1, 45], effective_from: '2026-05-25', created_at: '2026-05-23T02:05:00.000Z', created_by: 'staff-admin' },
     ],
+    weekly_free_reco: { enabled: true, set_count: 30 },
     terms: [
       '제1조 (목적)',
       '본 약관은 플러스로또(이하 "회사")가 제공하는 로또 번호 추천 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.',

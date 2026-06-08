@@ -1,7 +1,7 @@
 // 관리자(운영자 계정·권한 매트릭스) 데이터 훅 (CLAUDE §5·§8). 전부 TanStack Query 경유.
 // 계정 생성/수정/활성토글 + 권한 매트릭스 저장 → mock DB 변경 + admin 로그 적재 후 무효화.
 // TODO(live-verify): 실제 환경의 계정 비밀번호 설정·인증 규칙 미확인 → mock 은 비밀번호 없음(로그인 ID 기반).
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LogEntry, Role, Staff } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
@@ -37,6 +37,52 @@ export interface StaffInput {
   team_id: string | null
   is_active: boolean
   auto_assign_enabled: boolean // 자동배분 대상 풀 포함(rep 한정, §V2-1)
+}
+
+// ── 금일 디비 수량(관리자별) — 현장 피드백 ────────────────────────────────
+// 오늘 각 운영자에게 배정(=들어간 디비)된 건수를 수동/자동으로 구분해 집계한다.
+// 출처: assignments(staff_id, type, created_at). 리셋(staff_id=null)은 제외.
+export interface TodayDbCount {
+  total: number
+  manual: number
+  auto: number
+}
+
+function isToday(iso: string): boolean {
+  const d = new Date(iso)
+  const n = new Date()
+  return (
+    d.getFullYear() === n.getFullYear() &&
+    d.getMonth() === n.getMonth() &&
+    d.getDate() === n.getDate()
+  )
+}
+
+/** 오늘 배정 이력을 staff_id 별 {전체/수동/자동} 으로 집계. */
+export function tallyTodayDb(
+  assignments: readonly { staff_id: string | null; type: 'manual' | 'auto'; created_at: string }[],
+): Record<string, TodayDbCount> {
+  const out: Record<string, TodayDbCount> = {}
+  for (const a of assignments) {
+    if (!a.staff_id || !isToday(a.created_at)) continue
+    const cur = out[a.staff_id] ?? { total: 0, manual: 0, auto: 0 }
+    cur.total += 1
+    if (a.type === 'auto') cur.auto += 1
+    else cur.manual += 1
+    out[a.staff_id] = cur
+  }
+  return out
+}
+
+/** 관리자별 금일 디비 수량(전체/수동/자동). 관리자 화면 표시용. */
+export function useTodayDbCounts() {
+  return useQuery({
+    queryKey: ['today-db-counts'],
+    queryFn: async (): Promise<Record<string, TodayDbCount>> => {
+      if (dataSource === 'supabase') return supa.fetchTodayDbCounts()
+      return tallyTodayDb(readDb().assignments)
+    },
+  })
 }
 
 /** 운영자 계정 생성/수정. login_id 중복은 거부(throw)한다. */

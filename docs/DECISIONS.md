@@ -260,3 +260,35 @@
 - **이유**: Node 의 프록시 지원이 확실하고 앱이 이미 Vercel. 프록시의 **고정 IP 1개만 OneShot 에 등록**하면 서버리스에서도 발송 가능. (브라우저 직접 호출은 IP/CORS 로 불가, 키는 애초에 없음.)
 - **영향**: `supabase/functions/send-sms` 제거, `undici` 의존성 추가(api/ 전용 — Vite 앱 번들 미포함, tsconfig include=src 밖이라 앱 tsc 무영향). `tsc`·`build` 통과. 발신번호 = **1522-6385(`15226385`)** OneShot 등록 확인(사용가능). **미검증(고의)**: 프록시 IP 확보·OneShot 등록·실발송은 비용+발신동작이라 운영자 절차 후. 게이트: ① 고정IP 프록시 가입→`PROXY_URL`·고정IP ② 그 IP 를 OneShot 에 등록(1566-6639) ③ 특부가 여부(아니면 resellerCode 생략) ④ Vercel env 설정 ⑤ 배포 + 설정 실발송 ON + 테스트 1건. 참고: 가능하면 KR/아시아 IP 프록시 권장(지연·차단 리스크↓), 여의치 않으면 KR VPS(옵션 B) 폴백.
 - **✅ 실발송 검증 완료(2026-06-05)**: Fixie(Vercel Marketplace 통합, US-East, Tricycle 무료) 고정 IP 2개(`52.5.155.132`·`52.87.82.133`)를 OneShot(`lotto_dream_api`)에 등록 → `vercel --prod` 배포 → `POST /api/send-sms` curl 테스트 결과 `result_code:0, cmid:84489887` + **실제 단말 수신 확인**. `FIXIE_URL` 은 Fixie-Vercel 통합이 자동 주입(수동 env 불필요). 발신번호 `15226385`(env `ONESHOT_SEND_PHONE`). 운영 한도: Fixie 무료 500건/월(현 사용량 월 246건) — 발송 늘면 유료 전환. IP 화이트리스트는 additive(기존 발송 무영향).
+
+### D46. 프로덕션 라이브 컷오버(M8) — dataSource=supabase 전환 + 라이브 QA·RLS 검증 완료
+- **결정**: 프로덕션(Vercel `plus-lotto.vercel.app`)을 mock→**supabase 모드**로 전환. Vercel 프로덕션 env 에 `VITE_SUPABASE_URL`·`VITE_SUPABASE_ANON_KEY`·`VITE_DATA_SOURCE=supabase` 설정 후 `vercel --prod` 재배포(VITE_ 변수는 빌드타임에 번들 주입). 라이브 인증: Auth 사용자 5명(`<login_id>@pluslotto.local`) 생성 + `staff.auth_user_id` 연결, 테스트 비번 `Test1234!` 통일(SQL `crypt`+`email_confirmed_at`). 스키마 catch-up: `staff.auto_assign_enabled`·`site_settings.lotto_exclude_history` ALTER(멱등).
+- **이유**: 정차장 QA 핸드오프를 위해 외부 접속 가능한 라이브 URL 필요. 로컬(.env.local supabase) 검증 후 프로덕션 플립.
+- **영향(검증 완료 2026-06-05)**: ① 프로덕션 번들 supabase 모드 확정(`index-*.js`에 Supabase URL 주입). ② **라이브 인증 5계정 전부 로그인 OK**. ③ **RLS 계층 스코프 정확** — admin/manager 160건(전체)·leader 86건(팀)·rep01 43건·rep02 46건(본인 담당). ④ 브라우저 E2E — admin01 로그인→대시보드 실시간 KPI(신규8·미아웃콜65·결제대기8/₩264,000) + 이용자 160건·26세그먼트·인라인편집·일괄임포트 렌더, **콘솔 에러 0건**. SMS 함수 env(FIXIE_URL·ONESHOT_ID·ONESHOT_SEND_PHONE) 프로덕션 존재. **잔여**: git main 병합(현 `feat/v0.2-oneshot-live`)=사용자 실행 / D38 계층 staff_write RLS(실장·팀장 위임)=선택 적용 / 라이브 160건은 데모 QA 시드(실데이터는 V2 임포트로 적재). **보안**: service_role 키는 로컬 `.env.local`(gitignore) 한정, 브라우저 미노출(anon=RLS 보호).
+
+### D47. 현장 피드백 1차(디비입력 관련) — 유입구분 콜단계화 + 유입시간 정렬 고정 + 페이지크기 선택 + 콜메모 리스트화 + 관리자 금일 디비 집계
+- **결정**: 정의현 차장 카톡 피드백(2026-06-08, "디비입력 관련") 6건 반영.
+  1. **유입구분(=유입분류) 재정의**: 채널명(네이버/카카오…)이 아니라 **콜 단계** `신규/하루전부재/하루전거절/이틀전/삼일전`. `inflow_code`(채널, NAVER/KAKAO)와 분리. `INFLOW_TYPES` 를 `features/members/views.ts` 단일 출처로 정의 → bulk·생성·임포트·필터가 공유. 신규 등록 기본값=`신규`.
+  2. **유입시간 정렬 고정**: `sortMembers` 타이브레이커를 `registered_at` 내림차순+id 로 고정(`inflowTimeCmp`). 무정렬 기본도 유입시간 desc. 유입분류/기타 수정 후에도 목록 순서 불변.
+  3. **유입구분 필터 추가**: FilterBar 5번째 드롭다운(URL `?it=`) + 활성 칩. `MemberFilter.inflowType` 술어 추가.
+  4. **페이지 크기 선택**: 50 고정 → `25/50/100/200/500/1000`(`PAGE_SIZE_OPTIONS`). `Pagination`/`DataTablePagination` 에 `pageSizeOptions`+`onPageSizeChange` 추가, URL `?size=`(기본 50 은 생략).
+  5. **콜메모 리스트화**: `member.meta.memos[]`(MemoEntry: id·body·author·created_at) 누적. `useAddMemo`(+`supa.addMemo`) append 시 `member.memo`=최신 동기화(컬럼/메모있음 세그먼트 호환). 드로어 메모탭=입력칸+최신순 리스트(작성자·시각). DB초기화는 `meta.memos` 전체를 `reset_memos` 로 아카이브 후 비움.
+  6. **관리자 금일 디비**: `useTodayDbCounts`(+`supa.fetchTodayDbCounts`) — 오늘 `assignments`(staff_id·type) 를 관리자별 `{전체/수동/자동}` 집계. 관리자 화면 '금일 디비' 컬럼. 시드: 오늘 유입 회원 배정은 오늘 날짜로 기록(집계 시연).
+- **이유**: 운영 현장 용어(콜 단계)와 일치, 리스트 흔들림 방지, 대량 조회 편의, 상담 이력 누적 보존, 관리자별 일일 실적 가시화.
+- **영향**: `tsc`·`vite build` 통과(3601 모듈). mock 프리뷰 E2E(admin01) 전 항목 검증 — 유입 컬럼 '신규/KAKAO' 2단, 필터 유입구분 6옵션, `?size=25`→25행, 메모 2건 최신순 누적(이전 보존), 관리자 금일 디비(팀장 이 3=수동2·자동1 등), **콘솔 에러 0**. 공유 순수함수(listFrom/filterMembers/sortMembers)·supabase 쓰기경로 동일 코드라 라이브(supabase) 동작 동치. inflow_type 은 free-text 컬럼이라 라이브 기존 채널값 회원은 잔존(신규 편집부터 콜단계 적용). **TODO(live-verify)**: '금일 디비'=배정 이벤트 기준(중복배정 시 다건) — 차장 확인 후 distinct 회원 기준 전환 가능. 대량(15만) 페이지크기 1000 은 현 클라이언트 슬라이스(서버 페이지네이션 이관 TODO 유효).
+
+### D48. 현장 피드백 2차 — 고정/제외 등급별 규칙 + DB초기화 시 가입일시 갱신
+- **결정**: 정의현 차장 피드백 2건 반영.
+  1. **고정수/제외수 등급별 지정**: `LottoExcludeRule` 에 `grade: Grade|null`(null=공통). 설정 '로또 고정·제외'에 **대상 등급 선택** 추가, 이력 테이블에 **등급 컬럼** + **등급 그룹별 '적용중'** 산정(`activeIds`). 추천(`resolveExcludeForGrade`): 선택 등급 활성 규칙 → 없으면 공통(grade=null) → 없으면 레거시 `lotto_exclude` 폴백. `useLottoExclude` 는 SiteSettings 반환(select 제거), `RecommendPage` 에 **대상 등급 셀렉트** 추가(등급 변경 시 결과 무효화). 레거시 스냅샷은 공통 활성 규칙으로 동기화.
+  2. **DB초기화 시 가입일시=초기화 시점**: `useResetMembers`(+`supa.resetMembers`) 가 `registered_at`=초기화 ts 로 갱신(재사용 신규 리드는 입력=초기화 시점이 자연스러움). 확인모달 문구에 명시. supa 경로도 `meta.memos` 아카이브 정합성 보강.
+- **이유**: 등급(유료 티어)별로 추천 번호 구성을 달리 운영, 초기화된 디비를 '오늘 들어온 신규'로 취급(리스트 상단 노출·금일 디비 집계 일관).
+- **영향**: `DB_VERSION` 9→10 재시드(공통 1179/1180 + **VIP 1180 데모 규칙** fixed[17]·excluded[1,45]). `tsc`·`vite build`(3601 모듈) 통과. mock 프리뷰 E2E — 추천 공통 고정수=[7]/VIP 고정수=[17] 분기 확인, 설정 이력 등급 컬럼(공통/VIP 각각 '적용중'), DB초기화 시 pl1086 가입일시 `2026-04-08`→`2026-06-08`(초기화 시점) 이동 확인, **콘솔 에러 0**. 라이브 호환: 기존 history 규칙은 `grade` 누락 → `grade ?? null`=공통 처리(폴백 안전). site_settings jsonb 는 `select('*')` 통과라 grade 보존. **TODO(live-verify)**: 등급별 규칙을 어느 등급까지 운영할지(현재 8등급+공통 전체 노출)·추천 발송 시 회원 등급 자동 매핑 여부.
+
+### D49. 무료회원 주간 자동발급(매주 금 09:00, 30조합, 문자발송 X) + 홈페이지 자격증명(전화/뒷4자리)
+- **결정**: 정의현 차장 피드백. 운영콘솔에는 **발급·저장·조회 + 자격증명**만 구현(차장 확정: 고객 홈페이지는 별도 프론트). 조합 생성은 **기존 추천엔진**(`generateRecommendation`) 사용(차장 확정).
+  - **데이터**: `SiteSettings.weekly_free_reco { enabled, set_count(기본 30) }` + `member.meta.weekly_recos: WeeklyRecoIssue[]`(round_no·issued_at·sets, 최근 8회 보관).
+  - **발급 로직** `useIssueWeeklyFreeReco`(+`supa.issueWeeklyFreeReco`): 무료회원 전원에게 대상 회차(=최신 회차+1) 조합 `set_count`개 생성(회원별 결정적 시드 → 회원마다 다른 번호, 무료등급 고정/제외 규칙 적용→없으면 공통 폴백). **문자 발송 없음**, `reco.weekly_issue` 로그. **멱등**(이미 해당 회차 받은 회원 skip). 자동 스케줄(금 09:00)은 운영 환경 예약함수(pg_cron/Edge)가 동일 로직 호출 — 콘솔엔 **수동 트리거 '지금 발급'**(admin/manager) 제공.
+  - **조회**: 회원 상세 **'발급번호' 탭**(회차·30세트 LottoBalls) + 기본정보에 **홈페이지 ID(전화번호)/PW(뒷4자리)** 표시. `lib/homepage.ts`(`homepageId`/`homepagePw`)로 파생.
+  - **설정**: 설정›로또 고정·제외에 '무료회원 주간 발급' 카드(사용 토글 + 발급 조합수).
+- **이유**: 무료회원 리텐션(매주 무료 번호 제공)을 문자비용 없이 홈페이지 유도로 운영. 자격증명 기본세팅(전화/뒷4자리)은 고객 진입장벽 최소화. 콘솔은 발급/조회 책임만, 고객 홈페이지·실제 크론은 별도 인프라(기존 OneShot·효력일자 패턴과 동일하게 게이트).
+- **영향**: `DB_VERSION` 10→11 재시드(site_settings.weekly_free_reco 기본값). `tsc`·`vite build`(3601 모듈) 통과. mock 프리뷰 E2E(admin01) — 추천화면 발급카드(대상 무료 48명·30세트), '지금 발급'→**1181회 48명 발급 완료**(멱등 재실행 시 skip), 회원 드로어 발급번호 탭 30세트(전세트 고정수 7 포함=공통 규칙)·홈페이지 ID `01050338493`/PW `8493`(=010-5033-8493 뒷4자리), 설정 카드 렌더, **콘솔 에러 0**. 라이브 호환: weekly_free_reco 누락 시 기본값(30) 폴백, member.meta jsonb 에 weekly_recos 저장. **TODO(live-verify)**: ① 금 09:00 예약함수 배포(Supabase pg_cron 또는 scheduled Edge Function)가 `issueWeeklyFreeReco` 호출 ② 고객 홈페이지(전화/뒷4자리 인증 + 본인 weekly_recos 조회)는 별도 프론트 — anon 키로 본인 행만 읽도록 RLS/RPC 설계 필요 ③ 15만 무료회원 대량 발급은 서버측 배치(RPC/Edge)로 이관(현 행단위 update 는 데모 규모) ④ 비밀번호 변경 시 저장 위치(홈페이지측).

@@ -8,6 +8,7 @@ import { useStaff } from '@/lib/staff'
 import type { Grade } from '@/types/db'
 import { useBulkImportMembers, type MemberCreateInput } from './api'
 import { autoMapHeaders, IMPORT_FIELDS, parseLeadFile, type ParsedSheet } from './import'
+import { INFLOW_TYPES } from './views'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
 const selectCls =
@@ -250,13 +251,19 @@ export function ImportMembersModal({ onClose }: { onClose: () => void }) {
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[11.5px] font-semibold text-gray-500">유입분류</span>
-                <input
-                  className={inputCls}
-                  placeholder="예: 카카오"
+                <span className="mb-1 block text-[11.5px] font-semibold text-gray-500">유입구분</span>
+                <select
+                  className={selectCls}
                   value={defInflowType}
                   onChange={(e) => setDefInflowType(e.target.value)}
-                />
+                >
+                  <option value="">미지정</option>
+                  {INFLOW_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="block">
                 <span className="mb-1 block text-[11.5px] font-semibold text-gray-500">등급</span>

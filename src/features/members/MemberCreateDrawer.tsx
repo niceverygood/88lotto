@@ -9,6 +9,7 @@ import { GRADE_LABEL } from '@/design-system/labels'
 import { useStaff } from '@/lib/staff'
 import type { Grade } from '@/types/db'
 import { useCreateMember } from './api'
+import { INFLOW_TYPES } from './views'
 
 const inputCls =
   'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none focus:border-primary-500'
@@ -19,14 +20,14 @@ const errCls = 'mt-1 text-[11.5px] text-danger'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
 const TENDENCIES = ['적극', '보통', '신중', '무응답']
-// TODO(live-verify): 유입 프리셋은 실 운영 코드 체계로 확정.
-const INFLOW_PRESETS = [
-  { code: 'NAVER', type: '네이버검색' },
-  { code: 'FB', type: '페이스북' },
-  { code: 'KAKAO', type: '카카오' },
-  { code: 'TOSS', type: '토스DB' },
-  { code: 'REF', type: '지인추천' },
-  { code: 'BANNER', type: '배너광고' },
+// 유입경로(채널) 프리셋 — inflow_code(채널)만 채운다. 유입구분(콜 단계)은 별도 선택.
+const INFLOW_CODE_PRESETS = [
+  { code: 'NAVER', label: '네이버검색' },
+  { code: 'FB', label: '페이스북' },
+  { code: 'KAKAO', label: '카카오' },
+  { code: 'TOSS', label: '토스DB' },
+  { code: 'REF', label: '지인추천' },
+  { code: 'BANNER', label: '배너광고' },
 ]
 
 const schema = z.object({
@@ -58,7 +59,7 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
       name: '',
       phone: '',
       inflow_code: '',
-      inflow_type: '',
+      inflow_type: INFLOW_TYPES[0], // 신규
       tendency: '',
       grade: 'free',
       assigned_staff_id: '',
@@ -68,9 +69,7 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
   })
 
   const onPreset = (code: string) => {
-    const p = INFLOW_PRESETS.find((x) => x.code === code)
     setValue('inflow_code', code)
-    if (p) setValue('inflow_type', p.type)
   }
 
   const submit = handleSubmit((v) => {
@@ -126,12 +125,12 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelCls}>유입경로(프리셋)</label>
+            <label className={labelCls}>유입경로(채널)</label>
             <select className={inputCls} defaultValue="" onChange={(e) => onPreset(e.target.value)}>
               <option value="">직접입력</option>
-              {INFLOW_PRESETS.map((p) => (
+              {INFLOW_CODE_PRESETS.map((p) => (
                 <option key={p.code} value={p.code}>
-                  {p.type}
+                  {p.label}
                 </option>
               ))}
             </select>
@@ -155,8 +154,14 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
             <input className={inputCls} placeholder="NAVER, KAKAO…" {...register('inflow_code')} />
           </div>
           <div>
-            <label className={labelCls}>유입분류</label>
-            <input className={inputCls} {...register('inflow_type')} />
+            <label className={labelCls}>유입구분</label>
+            <select className={inputCls} {...register('inflow_type')}>
+              {INFLOW_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

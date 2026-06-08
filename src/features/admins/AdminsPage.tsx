@@ -14,7 +14,7 @@ import { useStaff, useTeams } from '@/lib/staff'
 import { datetime } from '@/lib/format'
 import { assignableRoles, canManageStaff, ROLE_LABEL, ROLE_ORDER } from '@/lib/permissions'
 import type { Role, Staff } from '@/types/db'
-import { useSaveStaff, useToggleStaffActive, type StaffInput } from './api'
+import { useSaveStaff, useToggleStaffActive, useTodayDbCounts, type StaffInput } from './api'
 
 const inputCls =
   'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none focus:border-primary-500'
@@ -46,6 +46,7 @@ export function AdminsPage() {
 
   const { data: staff = [], isLoading } = useStaff()
   const { data: teams = [] } = useTeams()
+  const { data: todayDb = {} } = useTodayDbCounts()
   const teamName = (id: string | null) => (id ? (teams.find((t) => t.id === id)?.name ?? id) : '—')
 
   const [edit, setEdit] = useState<Staff | 'new' | null>(null)
@@ -97,6 +98,9 @@ export function AdminsPage() {
                 <th className="w-28 px-2 py-2.5">역할</th>
                 <th className="w-24 px-2 py-2.5">팀</th>
                 <th className="w-20 px-2 py-2.5">상태</th>
+                <th className="w-36 px-2 py-2.5 text-right" title="오늘 배정된 디비 수량 (전체 · 수동/자동)">
+                  금일 디비
+                </th>
                 <th className="w-40 px-2 py-2.5 text-right">마지막 로그인</th>
                 <th className="w-32 px-3 py-2.5 text-right">관리</th>
               </tr>
@@ -124,6 +128,21 @@ export function AdminsPage() {
                     <td className="px-2 py-2.5 text-[12px] text-gray-600">{teamName(s.team_id)}</td>
                     <td className="px-2 py-2.5">
                       <ActiveChip active={s.is_active} />
+                    </td>
+                    <td className="px-2 py-2.5 text-right">
+                      {(() => {
+                        const c = todayDb[s.id]
+                        if (!c || c.total === 0)
+                          return <span className="font-mono text-[12px] text-gray-300">0</span>
+                        return (
+                          <span className="inline-flex items-baseline gap-1 font-mono tnum">
+                            <b className="text-[13px] text-ink-800">{c.total}</b>
+                            <span className="text-[10.5px] text-gray-400">
+                              수동 {c.manual} · 자동 {c.auto}
+                            </span>
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td className="px-2 py-2.5 text-right font-mono text-[11.5px] tnum text-gray-500">
                       {s.last_login_at ? datetime(s.last_login_at) : '—'}

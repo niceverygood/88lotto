@@ -301,6 +301,18 @@ export async function updateMember(id: string, patch: MemberPatch, actor: string
   await pushLog({ kind: 'admin', actor, action: 'member.update', target_type: 'member', target_id: id, meta: { patch, before } })
 }
 
+/** 콜메모 1건 append(리스트형). meta.memos 에 누적하고 members.memo(최신)를 동기화. */
+export async function addMemo(id: string, body: string, actor: string | null): Promise<void> {
+  const { data: cur } = await sb().from('members').select('meta').eq('id', id).maybeSingle()
+  const meta = ((cur as { meta: Record<string, unknown> } | null)?.meta ?? {}) as Record<string, unknown>
+  const list = Array.isArray(meta.memos) ? (meta.memos as unknown[]) : []
+  const entry = { id: genId('memo'), body, author: actor, created_at: nowIso() }
+  const nextMeta = { ...meta, memos: [...list, entry] }
+  const { error } = await sb().from('members').update({ meta: nextMeta, memo: body }).eq('id', id)
+  if (error) throw error
+  await pushLog({ kind: 'admin', actor, action: 'member.memo_add', target_type: 'member', target_id: id, meta: { body } })
+}
+
 export async function bulkUpdateMembers(
   ids: string[],
   patch: MemberPatch & { inflow_type?: string },
@@ -388,8 +400,14 @@ export async function resetMembers(ids: string[], actor: string | null): Promise
   const rows = (data ?? []) as { id: string; memo: string | null; meta: Record<string, unknown> | null }[]
   for (const r of rows) {
     const archive = (((r.meta?.reset_memos as unknown[] | undefined) ?? []) as unknown[]).slice()
-    if (r.memo && r.memo.trim()) archive.push({ body: r.memo, archived_at: ts, reset_by: actor })
-    const meta = { ...(r.meta ?? {}), reset_memos: archive, last_reset_at: ts }
+    // 리스트형 콜메모 전체 보존 후 비움. 없으면 단건 메모 폴백.
+    const memos = Array.isArray(r.meta?.memos) ? (r.meta!.memos as { body: string }[]) : []
+    if (memos.length > 0) {
+      for (const e of memos) archive.push({ body: e.body, archived_at: ts, reset_by: actor })
+    } else if (r.memo && r.memo.trim()) {
+      archive.push({ body: r.memo, archived_at: ts, reset_by: actor })
+    }
+    const meta = { ...(r.meta ?? {}), memos: [], reset_memos: archive, last_reset_at: ts }
     const { error } = await sb()
       .from('members')
       .update({
@@ -401,6 +419,7 @@ export async function resetMembers(ids: string[], actor: string | null): Promise
         outcall_done: false,
         tendency: null,
         last_active_at: null,
+        registered_at: ts, // 현장 피드백: 초기화 시점을 새 가입일시로
         is_suspended: false,
         is_deleted: false,
         is_withdrawn: false,

@@ -15,12 +15,11 @@ import {
   useSendSms,
   useSmsTemplates,
 } from './api'
+import { INFLOW_TYPES } from './views'
 
 type BulkModal = 'status' | 'inflow' | 'assign' | 'auto' | 'reset' | 'resetdb' | 'sms' | null
 
 const STATUS_VALUES: MemberStatus[] = ['active', 'suspended', 'deleted', 'withdrawn']
-// TODO(live-verify): 유입분류 목록은 실 운영 코드 체계로 확정.
-const INFLOW_TYPES = ['네이버검색', '페이스북', '카카오', '토스DB', '지인추천', '배너광고']
 
 const selectCls =
   'h-9 w-full rounded-md border border-gray-300 bg-white px-2.5 text-[13px] text-gray-700 outline-none focus:border-primary-500'
@@ -35,7 +34,7 @@ export function MemberBulkActions({
 }) {
   const [modal, setModal] = useState<BulkModal>(null)
   const [statusVal, setStatusVal] = useState<MemberStatus>('active')
-  const [inflowVal, setInflowVal] = useState(INFLOW_TYPES[0])
+  const [inflowVal, setInflowVal] = useState<string>(INFLOW_TYPES[0])
   const [staffVal, setStaffVal] = useState('')
   const [smsVal, setSmsVal] = useState('')
   const [autoPool, setAutoPool] = useState<string[]>([]) // 자동배분 실행 시 대상 풀(임시 가감)
@@ -347,7 +346,7 @@ export function MemberBulkActions({
         onClose={close}
         onConfirm={() => resetDb.mutate({ ids: selectedIds }, { onSuccess: done })}
         title="DB 초기화 (재사용)"
-        description={`${n}건을 입력 시점(신규 리드) 상태로 초기화합니다. 등급·상태·담당·아웃콜·성향이 리셋되고, 콜메모는 소프트삭제되어 최고관리자만 열람합니다. 결제 이력은 보존됩니다. 되돌릴 수 없습니다.`}
+        description={`${n}건을 입력 시점(신규 리드) 상태로 초기화합니다. 등급·상태·담당·아웃콜·성향이 리셋되고 가입일시는 초기화 시점으로 갱신됩니다. 콜메모는 소프트삭제되어 최고관리자만 열람합니다. 결제 이력은 보존됩니다. 되돌릴 수 없습니다.`}
         confirmText="초기화"
         tone="danger"
         loading={busy}

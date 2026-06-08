@@ -267,14 +267,29 @@ export interface LottoExcludeSettings {
 }
 
 // 회차별 고정/제외 이력 + 효력일자(§V2-5). 토요일 입력 → 익주 월요일(effective_from)부터 적용.
+// grade=null → 공통(전체 등급). 특정 등급 규칙이 있으면 그 등급은 등급 규칙, 없으면 공통으로 폴백(현장 피드백).
 export interface LottoExcludeRule {
   id: string
   round_no: number
+  grade: Grade | null // null = 공통(전체 등급 공통)
   fixed: number[]
   excluded: number[]
   effective_from: string // YYYY-MM-DD, 이 날짜부터 적용
   created_at: string
   created_by: string | null
+}
+
+// 무료회원 주간 자동발급(현장 피드백) — 매주 금 09:00 N조합 발급(문자발송 X), 홈페이지에서 조회.
+export interface WeeklyFreeRecoSettings {
+  enabled: boolean
+  set_count: number // 발급 조합 수(기본 30)
+}
+
+// 회원에게 발급된 주간 추천 1회분(member.meta.weekly_recos[]). 홈페이지(전화/뒷4자리)에서 조회.
+export interface WeeklyRecoIssue {
+  round_no: number
+  issued_at: string
+  sets: number[][] // 각 6/45 오름차순
 }
 
 export interface SiteSettings {
@@ -286,5 +301,6 @@ export interface SiteSettings {
   report: ReportSettings
   lotto_exclude: LottoExcludeSettings // 현재 적용 스냅샷(폴백)
   lotto_exclude_history: LottoExcludeRule[] // 회차별 이력 + 효력일자(§V2-5)
+  weekly_free_reco: WeeklyFreeRecoSettings // 무료회원 주간 자동발급(현장 피드백)
   terms: string // 이용약관 본문
 }

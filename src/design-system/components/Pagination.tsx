@@ -6,6 +6,8 @@ interface PaginationProps {
   pageSize: number
   total: number
   onPageChange: (page: number) => void
+  pageSizeOptions?: number[] // 제공 시 행수 선택 드롭다운 노출
+  onPageSizeChange?: (size: number) => void
   className?: string
 }
 
@@ -19,7 +21,15 @@ function pageWindow(current: number, last: number): number[] {
   return out
 }
 
-export function Pagination({ page, pageSize, total, onPageChange, className }: PaginationProps) {
+export function Pagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  pageSizeOptions,
+  onPageSizeChange,
+  className,
+}: PaginationProps) {
   const last = Math.max(1, Math.ceil(total / pageSize))
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1
   const to = Math.min(total, page * pageSize)
@@ -35,6 +45,22 @@ export function Pagination({ page, pageSize, total, onPageChange, className }: P
         <b className="font-mono text-ink-800">{to.toLocaleString('ko-KR')}</b> /{' '}
         {total.toLocaleString('ko-KR')}
       </span>
+      {pageSizeOptions && onPageSizeChange && (
+        <label className="ml-1 flex items-center gap-1 text-[12px] text-gray-500">
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            className="h-8 rounded-md border border-gray-300 bg-white px-1.5 text-[12px] text-gray-700 outline-none focus:border-primary-500"
+            aria-label="페이지당 행 수"
+          >
+            {pageSizeOptions.map((n) => (
+              <option key={n} value={n}>
+                {n}개씩
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="ml-auto flex items-center gap-1">
         <button
           type="button"
