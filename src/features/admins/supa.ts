@@ -6,7 +6,21 @@ import type { Role, Staff } from '@/types/db'
 import { genId } from '@/lib/db/store'
 import { insertLog, sb } from '@/lib/db/remote'
 import type { NavAccessMap } from '@/lib/permissions'
-import type { StaffInput } from './api'
+import { tallyTodayDb, type StaffInput, type TodayDbCount } from './api'
+
+/** 금일(오늘 0시~) 배정 이력을 staff 별 {전체/수동/자동} 으로 집계. */
+export async function fetchTodayDbCounts(): Promise<Record<string, TodayDbCount>> {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const { data, error } = await sb()
+    .from('assignments')
+    .select('staff_id, type, created_at')
+    .gte('created_at', start.toISOString())
+  if (error) throw error
+  return tallyTodayDb(
+    (data ?? []) as { staff_id: string | null; type: 'manual' | 'auto'; created_at: string }[],
+  )
+}
 
 /** 운영자 계정 생성/수정. login_id 중복은 거부(throw). 반환=staff id. */
 export async function saveStaff(

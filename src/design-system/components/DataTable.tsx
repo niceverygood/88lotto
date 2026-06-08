@@ -23,6 +23,8 @@ export interface DataTablePagination {
   pageSize: number
   total: number
   onPageChange: (page: number) => void
+  pageSizeOptions?: number[]
+  onPageSizeChange?: (size: number) => void
 }
 
 interface DataTableProps<T> {
@@ -314,6 +316,8 @@ export function DataTable<T>({
             pageSize={pagination.pageSize}
             total={pagination.total}
             onPageChange={pagination.onPageChange}
+            pageSizeOptions={pagination.pageSizeOptions}
+            onPageSizeChange={pagination.onPageSizeChange}
           />
         </div>
       )}

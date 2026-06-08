@@ -8,6 +8,7 @@ import {
   Button,
   ConfirmModal,
   Drawer,
+  LottoBalls,
   StatusChip,
   Tabs,
   type TabItem,
@@ -16,8 +17,11 @@ import { GRADE_LABEL, PAYMENT_METHOD_LABEL, SMS_TYPE_LABEL } from '@/design-syst
 import { date, datetime, krw, phone } from '@/lib/format'
 import { useStaff, useTeams } from '@/lib/staff'
 import { useRole } from '@/lib/auth'
-import type { Grade } from '@/types/db'
+import { homepageId, homepagePw } from '@/lib/homepage'
+import type { Grade, WeeklyRecoIssue } from '@/types/db'
 import {
+  readMemos,
+  useAddMemo,
   useAssignStaff,
   useMember,
   useMemberAssignments,
@@ -32,7 +36,12 @@ import {
 } from './api'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
-type DrawerTab = 'info' | 'payments' | 'sms' | 'assignments' | 'memo'
+type DrawerTab = 'info' | 'payments' | 'sms' | 'assignments' | 'memo' | 'reco'
+
+function readWeeklyRecos(meta: Record<string, unknown> | undefined): WeeklyRecoIssue[] {
+  const list = meta?.weekly_recos as WeeklyRecoIssue[] | undefined
+  return Array.isArray(list) ? list : []
+}
 
 const selectCls =
   'h-8 rounded-md border border-gray-300 bg-white px-2 text-[12px] text-gray-700 outline-none focus:border-primary-500'
@@ -50,6 +59,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
 
   const role = useRole()
   const updateMember = useUpdateMember()
+  const addMemo = useAddMemo()
   const assignStaff = useAssignStaff()
   const resetAssign = useResetAssign()
   const sendSms = useSendSms()
@@ -60,7 +70,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const [confirmSuspend, setConfirmSuspend] = useState(false)
 
   useEffect(() => {
-    setMemoDraft(member?.memo ?? '')
+    setMemoDraft('') // 새 콜메모 입력칸(리스트형 누적) — 회원 전환 시 비움
     setTab('info')
   }, [member?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -97,7 +107,8 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     { key: 'payments', label: '결제내역', count: payments.length },
     { key: 'sms', label: '문자내역', count: sms.length },
     { key: 'assignments', label: '배정이력', count: assignments.length },
-    { key: 'memo', label: '메모' },
+    { key: 'memo', label: '메모', count: readMemos(member).length || undefined },
+    { key: 'reco', label: '발급번호', count: readWeeklyRecos(member.meta).length || undefined },
   ]
 
   const title = (
@@ -189,7 +200,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
           <Row label="유입코드" mono>
             {member.inflow_code ?? '-'}
           </Row>
-          <Row label="유입분류">{member.inflow_type ?? '-'}</Row>
+          <Row label="유입구분">{member.inflow_type ?? '-'}</Row>
           <Row label="담당자">{member.assigned_staff_id ? staffName[member.assigned_staff_id] ?? '-' : '미지정'}</Row>
           <Row label="팀">{member.team_id ? teamName[member.team_id] ?? '-' : '-'}</Row>
           <Row label="가입일시" mono>
@@ -199,6 +210,12 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             {member.last_active_at ? datetime(member.last_active_at) : '미접속'}
           </Row>
           <Row label="당첨이력">{member.win_history ?? '-'}</Row>
+          <Row label="홈페이지 ID" mono>
+            {homepageId(member.phone) || '-'}
+          </Row>
+          <Row label="홈페이지 PW(기본)" mono>
+            {homepagePw(member.phone) || '-'}
+          </Row>
         </dl>
       )}
 
@@ -293,23 +310,60 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
 
       {tab === 'memo' && (
         <div>
+          {/* 새 콜메모 추가 — 리스트형 누적(현장 피드백) */}
           <textarea
             value={memoDraft}
             onChange={(e) => setMemoDraft(e.target.value)}
-            rows={5}
-            placeholder="상담 메모를 입력하세요."
+            rows={3}
+            placeholder="상담 메모를 입력하고 추가하세요. (기존 메모는 보존됩니다)"
             className="w-full rounded-md border border-gray-300 p-2.5 text-[13px] text-gray-700 outline-none focus:border-primary-500"
           />
           <div className="mt-2 flex justify-end">
             <Button
               size="sm"
               variant="pri"
-              disabled={memoDraft === (member.memo ?? '') || updateMember.isPending}
-              onClick={() => updateMember.mutate({ id, patch: { memo: memoDraft || null } })}
+              disabled={!memoDraft.trim() || addMemo.isPending}
+              onClick={() =>
+                addMemo.mutate(
+                  { id, body: memoDraft },
+                  { onSuccess: () => setMemoDraft('') },
+                )
+              }
             >
-              메모 저장
+              메모 추가
             </Button>
           </div>
+
+          {/* 누적 콜메모(최신순) */}
+          {(() => {
+            const memos = readMemos(member)
+            if (memos.length === 0) {
+              return (
+                <div className="mt-4 py-8 text-center text-[12.5px] text-gray-400">
+                  등록된 메모가 없습니다.
+                </div>
+              )
+            }
+            return (
+              <ul className="mt-4 space-y-2">
+                {memos
+                  .slice()
+                  .reverse()
+                  .map((m) => (
+                    <li key={m.id} className="rounded-md border border-gray-200 bg-white p-2.5">
+                      <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-800">
+                        {m.body}
+                      </p>
+                      <div className="mt-1 flex items-center gap-1.5 text-[10.5px] text-gray-400">
+                        <span className="font-mono tnum">{datetime(m.created_at)}</span>
+                        {m.author && <span>· {staffName[m.author] ?? m.author}</span>}
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            )
+          })()}
+
           {role === 'admin' &&
             (() => {
               const archived = (member.meta?.reset_memos as ResetMemo[] | undefined) ?? []
@@ -334,6 +388,52 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                 </div>
               )
             })()}
+        </div>
+      )}
+
+      {tab === 'reco' && (
+        <div>
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent-100 bg-accent-50 px-3 py-2 text-[11.5px] text-ink-700">
+            <span>
+              무료회원 주간 발급 번호입니다(매주 금 09:00, 문자 발송 없음). 회원은 홈페이지에서{' '}
+              <b className="font-mono">{homepageId(member.phone)}</b> / 뒷4자리{' '}
+              <b className="font-mono">{homepagePw(member.phone)}</b> 로 로그인해 확인합니다.
+            </span>
+          </div>
+          {(() => {
+            const issues = readWeeklyRecos(member.meta)
+            if (issues.length === 0) {
+              return (
+                <div className="py-10 text-center text-[12.5px] text-gray-400">
+                  발급된 번호가 없습니다.
+                </div>
+              )
+            }
+            return (
+              <div className="space-y-4">
+                {issues.map((iss) => (
+                  <div key={`${iss.round_no}-${iss.issued_at}`} className="rounded-md border border-gray-200 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[12.5px] font-bold text-ink-800">
+                        {iss.round_no}회 · {iss.sets.length}세트
+                      </span>
+                      <span className="font-mono text-[10.5px] tnum text-gray-400">{datetime(iss.issued_at)}</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {iss.sets.map((set, i) => (
+                        <li key={i} className="flex items-center gap-2">
+                          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-gray-100 text-[10px] font-bold text-gray-500 tnum">
+                            {i + 1}
+                          </span>
+                          <LottoBalls numbers={set} size="sm" />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
         </div>
       )}
 

@@ -4,11 +4,18 @@
 //   회차 등록 → 중복 검사 후 미확정 회차 추가 + 로그
 // 회차/베팅은 전역 데이터(RLS 스코프 없음). 읽기(useRounds)는 fetchTables 스냅샷으로 재사용.
 // TODO(live-verify): 회차 베팅 채점은 행 단위 update — 대량 회차는 RPC(set-based)로 이관 권장.
-import type { Bet, LottoRound } from '@/types/db'
+import type { Bet, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { nowIso } from '@/lib/db/store'
-import { insertLog, sb } from '@/lib/db/remote'
+import { insertLog, fetchSiteSettings, sb } from '@/lib/db/remote'
 import { gradeRank, lottoSum, oddEven, prizeForRank } from '@/lib/lotto'
-import type { RegisterResult, RegisterRoundInput } from './api'
+import { generateRecommendation } from '@/lib/lottoGenerator'
+import {
+  resolveExcludeForGrade,
+  WEEKLY_FREE_RECO_DEFAULT,
+  type RegisterResult,
+  type RegisterRoundInput,
+  type WeeklyIssueResult,
+} from './api'
 
 /** 당첨 확정: 회차 베팅 등수/당첨금 (재)산정 + 1~3등 회원 win_history 갱신. 멱등. */
 export async function confirmRound(roundNo: number, actor: string | null): Promise<void> {
@@ -98,4 +105,74 @@ export async function registerRound(
     meta: { numbers: round.numbers, bonus: round.bonus },
   })
   return { ok: true }
+}
+
+// ── 무료회원 주간 자동발급(현장 피드백) — mock useIssueWeeklyFreeReco 미러 ──────
+function seedFor(id: string, round: number): number {
+  let h = round * 2654435761
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+  return h >>> 0
+}
+
+type FreeRow = { id: string; meta: Record<string, unknown> | null }
+
+export async function fetchWeeklyFreeRecoStatus(): Promise<{
+  freeCount: number
+  lastRound: number | null
+  lastIssuedAt: string | null
+}> {
+  const { data, error } = await sb().from('members').select('id, meta').eq('grade', 'free')
+  if (error) throw error
+  const rows = (data ?? []) as FreeRow[]
+  let lastRound: number | null = null
+  let lastIssuedAt: string | null = null
+  for (const r of rows) {
+    const recos = Array.isArray(r.meta?.weekly_recos) ? (r.meta!.weekly_recos as WeeklyRecoIssue[]) : []
+    const top = recos[0]
+    if (top && (lastIssuedAt === null || top.issued_at > lastIssuedAt)) {
+      lastIssuedAt = top.issued_at
+      lastRound = top.round_no
+    }
+  }
+  return { freeCount: rows.length, lastRound, lastIssuedAt }
+}
+
+export async function issueWeeklyFreeReco(actor: string | null): Promise<WeeklyIssueResult> {
+  const settings = (await fetchSiteSettings()) as SiteSettings
+  const cfg = settings.weekly_free_reco ?? WEEKLY_FREE_RECO_DEFAULT
+  const setCount = Math.max(1, cfg.set_count || WEEKLY_FREE_RECO_DEFAULT.set_count)
+  const { data: rdata, error: re } = await sb().from('lotto_rounds').select('*')
+  if (re) throw re
+  const rounds = (rdata ?? []) as LottoRound[]
+  const exclude = resolveExcludeForGrade(settings, 'free')
+  const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
+
+  const { data: mdata, error: me } = await sb().from('members').select('id, meta').eq('grade', 'free')
+  if (me) throw me
+  const rows = (mdata ?? []) as FreeRow[]
+  const ts = nowIso()
+  let issued = 0
+  let skipped = 0
+  for (const r of rows) {
+    const recos = Array.isArray(r.meta?.weekly_recos) ? (r.meta!.weekly_recos as WeeklyRecoIssue[]) : []
+    if (recos[0]?.round_no === targetRound) {
+      skipped++
+      continue
+    }
+    const res = generateRecommendation(rounds, exclude, { mode: 20, setCount, seed: seedFor(r.id, targetRound) })
+    const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }
+    const meta = { ...(r.meta ?? {}), weekly_recos: [issue, ...recos].slice(0, 8) }
+    const { error } = await sb().from('members').update({ meta }).eq('id', r.id)
+    if (error) throw error
+    issued++
+  }
+  await insertLog({
+    kind: 'admin',
+    actor,
+    action: 'reco.weekly_issue',
+    target_type: 'member',
+    target_id: null,
+    meta: { count: issued, skipped, round_no: targetRound, set_count: setCount, channel: 'weekly_free' },
+  })
+  return { issued, skipped, round_no: targetRound }
 }

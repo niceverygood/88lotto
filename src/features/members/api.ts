@@ -44,17 +44,26 @@ function sortValue(m: Member, id: string): SortVal | null {
   }
 }
 
+// 유입시간(registered_at) 내림차순 + id 를 안정 타이브레이커로 사용한다.
+// 현장 피드백: 유입분류/기타 수정 시에도 목록 순서가 흔들리지 않고 유입시간 기준으로 고정되어야 함.
+function inflowTimeCmp(a: Member, b: Member): number {
+  const ta = Date.parse(a.registered_at)
+  const tb = Date.parse(b.registered_at)
+  if (ta !== tb) return tb - ta // 최신 유입 우선
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}
+
 function sortMembers(rows: Member[], sortId: string, desc: boolean): Member[] {
   const dir = desc ? -1 : 1
   return [...rows].sort((a, b) => {
     const va = sortValue(a, sortId)
     const vb = sortValue(b, sortId)
-    if (va === null && vb === null) return 0
+    if (va === null && vb === null) return inflowTimeCmp(a, b)
     if (va === null) return 1 // null 은 항상 뒤로
     if (vb === null) return -1
     if (va < vb) return -1 * dir
     if (va > vb) return 1 * dir
-    return 0
+    return inflowTimeCmp(a, b) // 동일 키는 유입시간으로 고정
   })
 }
 
@@ -89,6 +98,21 @@ export interface MemberPatch {
   memo?: string | null
   tendency?: string | null
   outcall_done?: boolean
+}
+
+// ── 콜메모(리스트형) — 현장 피드백: 메모 1건만이 아니라 순차적으로 누적 ──────
+export interface MemoEntry {
+  id: string
+  body: string
+  author: string | null // 작성 staff id
+  created_at: string
+}
+
+/** member.meta.memos 를 안전하게 읽는다(없으면 빈 배열). */
+export function readMemos(m: Member | null | undefined): MemoEntry[] {
+  if (!m) return []
+  const list = m.meta?.memos as MemoEntry[] | undefined
+  return Array.isArray(list) ? list : []
 }
 
 function applyPatch(m: Member, patch: MemberPatch): void {
@@ -335,6 +359,42 @@ export function useUpdateMember() {
         const before: MemberPatch = { grade: m.grade, status: m.status }
         applyPatch(m, v.patch)
         db.logs.push(adminLog(user?.id ?? null, 'member.update', v.id, { patch: v.patch, before }))
+      })
+      return v.id
+    },
+    onSuccess: (id) => invalidate([id]),
+  })
+}
+
+/**
+ * 콜메모 추가(리스트형 누적) — 현장 피드백. meta.memos 에 한 건씩 append 하고
+ * member.memo(최신 1건)는 목록/필터 호환을 위해 마지막 메모로 동기화한다.
+ */
+export function useAddMemo() {
+  const user = useCurrentUser()
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; body: string }) => {
+      const body = v.body.trim()
+      if (!body) return v.id
+      if (dataSource === 'supabase') {
+        await supa.addMemo(v.id, body, user?.id ?? null)
+        return v.id
+      }
+      mutateDb((db) => {
+        const m = db.members.find((x) => x.id === v.id)
+        if (!m) return
+        const entry: MemoEntry = {
+          id: genId('memo'),
+          body,
+          author: user?.id ?? null,
+          created_at: nowIso(),
+        }
+        const list = (Array.isArray(m.meta?.memos) ? (m.meta!.memos as MemoEntry[]) : []).slice()
+        list.push(entry)
+        m.meta = { ...m.meta, memos: list }
+        m.memo = body // 최신 메모(컬럼/메모있음 세그먼트 호환)
+        db.logs.push(adminLog(user?.id ?? null, 'member.memo_add', v.id, { body }))
       })
       return v.id
     },
@@ -655,8 +715,13 @@ export function useResetMembers() {
         for (const m of db.members) {
           if (!v.ids.includes(m.id)) continue
           const archive = ((m.meta?.reset_memos as ResetMemo[] | undefined) ?? []).slice()
-          if (m.memo && m.memo.trim())
+          // 리스트형 콜메모 전체를 보존 후 비운다. 리스트가 없으면 단건 메모로 폴백.
+          const memos = Array.isArray(m.meta?.memos) ? (m.meta!.memos as MemoEntry[]) : []
+          if (memos.length > 0) {
+            for (const e of memos) archive.push({ body: e.body, archived_at: ts, reset_by: user?.id ?? null })
+          } else if (m.memo && m.memo.trim()) {
             archive.push({ body: m.memo, archived_at: ts, reset_by: user?.id ?? null })
+          }
           m.memo = null
           m.grade = 'free'
           m.status = 'active'
@@ -665,10 +730,11 @@ export function useResetMembers() {
           m.outcall_done = false
           m.tendency = null
           m.last_active_at = null
+          m.registered_at = ts // 현장 피드백: 초기화 시점을 새 가입일시로 표시(재사용 신규 리드)
           m.is_suspended = false
           m.is_deleted = false
           m.is_withdrawn = false
-          m.meta = { ...m.meta, reset_memos: archive, last_reset_at: ts }
+          m.meta = { ...m.meta, memos: [], reset_memos: archive, last_reset_at: ts }
           db.assignments.push({
             id: genId('as'),
             member_id: m.id,

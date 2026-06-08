@@ -29,7 +29,10 @@ import {
 } from './api'
 import {
   getView,
+  INFLOW_TYPES,
   MORE_VIEWS,
+  PAGE_SIZE_OPTIONS,
+  DEFAULT_PAGE_SIZE,
   TAB_VIEWS,
   type MemberFilter,
   type ViewGroup,
@@ -40,7 +43,6 @@ import { MemberDrawer } from './MemberDrawer'
 import { MemberCreateDrawer } from './MemberCreateDrawer'
 import { ImportMembersModal } from './ImportMembersModal'
 
-const PAGE_SIZE = 50
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
 const STATUSES: MemberStatus[] = ['active', 'suspended', 'deleted', 'withdrawn']
 const INFLOW_CODES = ['NAVER', 'FB', 'KAKAO', 'TOSS', 'REF', 'BANNER']
@@ -64,6 +66,8 @@ export function MembersPage() {
   const viewKey = get('view') ?? 'all'
   const search = get('q') ?? ''
   const page = Math.max(1, Number(get('page') ?? '1') || 1)
+  const sizeRaw = Number(get('size') ?? '') || DEFAULT_PAGE_SIZE
+  const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(sizeRaw) ? sizeRaw : DEFAULT_PAGE_SIZE
   const sortRaw = get('sort')
   const [sortId, sortDirRaw] = sortRaw ? sortRaw.split(':') : [undefined, undefined]
   const sortDesc = sortDirRaw === 'desc'
@@ -72,12 +76,14 @@ export function MembersPage() {
   const statusF = get('st') as MemberStatus | undefined
   const staffF = get('staff')
   const inflowF = get('inflow')
+  const inflowTypeF = get('it')
 
   const extra: MemberFilter = {
     grade: gradeF,
     status: statusF,
     assignedStaffId: staffF,
     inflowCode: inflowF,
+    inflowType: inflowTypeF,
   }
 
   const query: MembersQuery = {
@@ -85,7 +91,7 @@ export function MembersPage() {
     search,
     extra,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
     sortId,
     sortDesc,
   }
@@ -102,7 +108,7 @@ export function MembersPage() {
     () => [{ value: '', label: '미지정' }, ...staff.map((s) => ({ value: s.id, label: s.name }))],
     [staff],
   )
-  const pageOffset = (page - 1) * PAGE_SIZE
+  const pageOffset = (page - 1) * pageSize
   const columns = useMemo(
     () =>
       memberColumns({
@@ -149,7 +155,9 @@ export function MembersPage() {
     const name = staff.find((s) => s.id === staffF)?.name ?? staffF
     chips.push({ key: 'staff', label: `담당: ${name}`, onRemove: () => remove('staff') })
   }
-  if (inflowF) chips.push({ key: 'inflow', label: `유입: ${inflowF}`, onRemove: () => remove('inflow') })
+  if (inflowF) chips.push({ key: 'inflow', label: `유입코드: ${inflowF}`, onRemove: () => remove('inflow') })
+  if (inflowTypeF)
+    chips.push({ key: 'it', label: `유입구분: ${inflowTypeF}`, onRemove: () => remove('it') })
 
   const clearAll = () => clear(['view'])
 
@@ -235,7 +243,7 @@ export function MembersPage() {
         chips={chips}
         onClearAll={chips.length > 0 ? clearAll : undefined}
       >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Field label="등급">
             <select
               className={selectCls}
@@ -292,6 +300,20 @@ export function MembersPage() {
               ))}
             </select>
           </Field>
+          <Field label="유입구분">
+            <select
+              className={selectCls}
+              value={inflowTypeF ?? ''}
+              onChange={(e) => set('it', e.target.value || null, { resetPage: true })}
+            >
+              <option value="">전체</option>
+              {INFLOW_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </Field>
         </div>
       </FilterBar>
 
@@ -316,9 +338,12 @@ export function MembersPage() {
         )}
         pagination={{
           page,
-          pageSize: PAGE_SIZE,
+          pageSize,
           total: data?.total ?? 0,
           onPageChange: (p) => set('page', p === 1 ? null : p),
+          pageSizeOptions: [...PAGE_SIZE_OPTIONS],
+          onPageSizeChange: (size) =>
+            setMany({ size: size === DEFAULT_PAGE_SIZE ? null : String(size), page: null }),
         }}
       />
 
