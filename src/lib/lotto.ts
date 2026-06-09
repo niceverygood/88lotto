@@ -1,10 +1,13 @@
 // 로또(6/45) 순수 도메인 로직 — React/UI 비의존. seed(lib) 와 features/lotto 가 함께 import 해
 // '시드 생성'과 '당첨 확정'이 동일한 규칙으로 등수/당첨금을 산정하도록 단일 출처로 둔다.
-import type { LottoRound } from '@/types/db'
+import type { Grade, LottoRound } from '@/types/db'
 
 export const LOTTO_MIN = 1
 export const LOTTO_MAX = 45
 export const LOTTO_PICK = 6
+
+// 고정/제외수를 운영하는 등급(현장 피드백 2026-06): 골드·VIP·로얄 3등급만. 그 외는 '공통' 적용.
+export const LOTTO_RULE_GRADES: Grade[] = ['gold', 'vip', 'royal']
 
 /** 6개 번호 합. */
 export function lottoSum(numbers: readonly number[]): number {
