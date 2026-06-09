@@ -77,7 +77,13 @@ const INFLOW = [
 // 유입구분(콜 단계) — inflow_type. 현장 피드백(2026-06): 채널명이 아니라 콜 단계로 운영.
 // features/members/views.ts 의 INFLOW_TYPES 와 동일 값(레이어 분리상 시드에 인라인).
 const INFLOW_STAGE_W: readonly (readonly [string, number])[] = [
-  ['신규', 30], ['하루전부재', 22], ['하루전거절', 18], ['이틀전', 16], ['삼일전', 14],
+  ['신규', 26], ['하루전부재', 20], ['하루전거절', 16], ['이틀전', 14], ['삼일전', 12], ['구디비', 12],
+]
+
+// 상담상태(현장 피드백)
+const CONSULT_W: readonly (readonly [string, number])[] = [
+  ['신규', 30], ['부재', 16], ['가망', 14], ['통화예약', 10], ['결번', 8],
+  ['승인', 8], ['일반거절', 7], ['도입거절', 5], ['기타', 2],
 ]
 
 const GRADE_W: readonly (readonly [Grade, number])[] = [
@@ -126,6 +132,7 @@ function genMembers(rng: Rng, now: number): Member[] {
       grade,
       status,
       tendency: rng() < 0.8 ? pick(rng, TENDENCY) : null,
+      consult_status: isToday ? '신규' : weighted(rng, CONSULT_W),
       inflow_code: inflow.code,
       // 유입구분(콜 단계): 오늘 유입은 '신규', 과거 유입은 단계 분포.
       inflow_type: isToday ? '신규' : weighted(rng, INFLOW_STAGE_W),

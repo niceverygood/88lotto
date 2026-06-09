@@ -18,6 +18,7 @@ import { date, datetime, krw, phone } from '@/lib/format'
 import { useStaff, useTeams } from '@/lib/staff'
 import { useRole } from '@/lib/auth'
 import { homepageId, homepagePw } from '@/lib/homepage'
+import { CONSULT_STATUSES } from './views'
 import type { Grade, WeeklyRecoIssue } from '@/types/db'
 import {
   readMemos,
@@ -157,6 +158,21 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             ))}
           </select>
         </label>
+        <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-500">
+          상담상태
+          <select
+            className={selectCls}
+            value={member.consult_status ?? ''}
+            onChange={(e) => updateMember.mutate({ id, patch: { consult_status: e.target.value || null } })}
+          >
+            <option value="">미지정</option>
+            {CONSULT_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="ml-auto flex items-center gap-2">
           <Button
             size="sm"
@@ -196,6 +212,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             <StatusChip status={member.status} />
           </Row>
           <Row label="성향">{member.tendency ?? '-'}</Row>
+          <Row label="상담상태">{member.consult_status ?? '-'}</Row>
           <Row label="아웃콜">{member.outcall_done ? '완료' : '미처리'}</Row>
           <Row label="유입코드" mono>
             {member.inflow_code ?? '-'}

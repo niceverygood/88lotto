@@ -5,10 +5,16 @@ import { Badge, NumCell, InlineSelect, type InlineSelectOption } from '@/design-
 import { dateShort, datetime, phone } from '@/lib/format'
 import type { Member, MemberStatus, Role } from '@/types/db'
 import { STATUS_META } from '@/design-system/labels'
+import { CONSULT_STATUSES } from './views'
 
 const STATUS_OPTIONS: InlineSelectOption[] = (
   ['active', 'suspended', 'deleted', 'withdrawn'] as MemberStatus[]
 ).map((s) => ({ value: s, label: STATUS_META[s].label }))
+
+const CONSULT_OPTIONS: InlineSelectOption[] = [
+  { value: '', label: '미지정' },
+  ...CONSULT_STATUSES.map((s) => ({ value: s, label: s })),
+]
 
 export interface MemberColumnsCtx {
   pageOffset: number // 현재 페이지 시작 인덱스(No 표시용)
@@ -16,6 +22,7 @@ export interface MemberColumnsCtx {
   canEditStaff: boolean // 담당 변경 권한(rep 은 비활성)
   onChangeStatus: (id: string, status: MemberStatus) => void
   onChangeStaff: (id: string, staffId: string) => void // '' = 미지정(리셋)
+  onChangeConsult: (id: string, consult: string) => void // 상담상태 인라인 변경
 }
 
 const TEND_TONE: Record<string, string> = {
@@ -102,6 +109,22 @@ export function memberColumns(ctx: MemberColumnsCtx): ColumnDef<Member>[] {
       cell: (info) => (
         <span className="font-mono text-[12px] text-gray-600">{phone(info.row.original.phone)}</span>
       ),
+    },
+    {
+      id: 'consult_status',
+      header: '상담상태',
+      enableSorting: false,
+      cell: (info) => {
+        const m = info.row.original
+        return (
+          <InlineSelect
+            value={m.consult_status ?? ''}
+            options={CONSULT_OPTIONS}
+            onChange={(v) => ctx.onChangeConsult(m.id, v)}
+            className="max-w-[96px]"
+          />
+        )
+      },
     },
     {
       id: 'tendency',

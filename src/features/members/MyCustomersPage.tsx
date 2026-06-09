@@ -74,6 +74,8 @@ export function MyCustomersPage() {
         onChangeStatus: (id, status) => updateMember.mutate({ id, patch: { status } }),
         onChangeStaff: (id, staffId) =>
           staffId ? assignStaff.mutate({ ids: [id], staffId }) : resetAssign.mutate({ ids: [id] }),
+        onChangeConsult: (id, consult) =>
+          updateMember.mutate({ id, patch: { consult_status: consult || null } }),
       }),
     [pageOffset, staffOptions, role], // eslint-disable-line react-hooks/exhaustive-deps
   )
