@@ -9,18 +9,16 @@ import { genId } from '@/lib/db/store'
 import { useCurrentUser } from '@/lib/auth'
 import { cn } from '@/lib/cn'
 import { GRADE_LABEL } from '@/design-system/labels'
+import { LOTTO_RULE_GRADES } from '@/lib/lotto'
 import { SectionCard } from './ui'
 import { useSaveSiteSettings, useSiteSettings } from './api'
 
 type Mode = 'fixed' | 'excluded'
 const NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1)
-// 등급별 고정/제외(현장 피드백). null = 공통(전체 등급 공통).
+// 등급별 고정/제외(현장 피드백) — 골드·VIP·로얄 3등급만 운영. null = 공통(전체).
 const GRADE_OPTIONS: { value: Grade | null; label: string }[] = [
   { value: null, label: '공통(전체)' },
-  ...(['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss'] as Grade[]).map((g) => ({
-    value: g,
-    label: GRADE_LABEL[g],
-  })),
+  ...LOTTO_RULE_GRADES.map((g) => ({ value: g, label: GRADE_LABEL[g] })),
 ]
 const gradeLabel = (g: Grade | null) => (g == null ? '공통(전체)' : GRADE_LABEL[g])
 const fieldCls =

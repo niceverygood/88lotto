@@ -8,7 +8,7 @@ import { usePageMeta } from '@/app/uiStore'
 import { useRole } from '@/lib/auth'
 import { cn } from '@/lib/cn'
 import { datetime, num } from '@/lib/format'
-import { lottoSum, oddEven } from '@/lib/lotto'
+import { lottoSum, oddEven, LOTTO_RULE_GRADES } from '@/lib/lotto'
 import { GRADE_LABEL } from '@/design-system/labels'
 import type { Grade } from '@/types/db'
 import {
@@ -28,13 +28,10 @@ import {
   WEEKLY_FREE_RECO_DEFAULT,
 } from './api'
 
-// 등급별 고정/제외 선택용(현장 피드백). null = 공통(전체 등급 공통 규칙).
+// 등급별 고정/제외 선택용(현장 피드백) — 골드·VIP·로얄 3등급만. null = 공통(전체).
 const GRADE_OPTIONS: { value: Grade | null; label: string }[] = [
   { value: null, label: '공통(전체)' },
-  ...(['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss'] as Grade[]).map((g) => ({
-    value: g,
-    label: GRADE_LABEL[g],
-  })),
+  ...LOTTO_RULE_GRADES.map((g) => ({ value: g, label: GRADE_LABEL[g] })),
 ]
 
 const RULE_CHIP: Record<ExclusionRuleKey, string> = {
