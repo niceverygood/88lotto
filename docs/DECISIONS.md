@@ -292,3 +292,11 @@
   - **설정**: 설정›로또 고정·제외에 '무료회원 주간 발급' 카드(사용 토글 + 발급 조합수).
 - **이유**: 무료회원 리텐션(매주 무료 번호 제공)을 문자비용 없이 홈페이지 유도로 운영. 자격증명 기본세팅(전화/뒷4자리)은 고객 진입장벽 최소화. 콘솔은 발급/조회 책임만, 고객 홈페이지·실제 크론은 별도 인프라(기존 OneShot·효력일자 패턴과 동일하게 게이트).
 - **영향**: `DB_VERSION` 10→11 재시드(site_settings.weekly_free_reco 기본값). `tsc`·`vite build`(3601 모듈) 통과. mock 프리뷰 E2E(admin01) — 추천화면 발급카드(대상 무료 48명·30세트), '지금 발급'→**1181회 48명 발급 완료**(멱등 재실행 시 skip), 회원 드로어 발급번호 탭 30세트(전세트 고정수 7 포함=공통 규칙)·홈페이지 ID `01050338493`/PW `8493`(=010-5033-8493 뒷4자리), 설정 카드 렌더, **콘솔 에러 0**. 라이브 호환: weekly_free_reco 누락 시 기본값(30) 폴백, member.meta jsonb 에 weekly_recos 저장. **TODO(live-verify)**: ① 금 09:00 예약함수 배포(Supabase pg_cron 또는 scheduled Edge Function)가 `issueWeeklyFreeReco` 호출 ② 고객 홈페이지(전화/뒷4자리 인증 + 본인 weekly_recos 조회)는 별도 프론트 — anon 키로 본인 행만 읽도록 RLS/RPC 설계 필요 ③ 15만 무료회원 대량 발급은 서버측 배치(RPC/Edge)로 이관(현 행단위 update 는 데모 규모) ④ 비밀번호 변경 시 저장 위치(홈페이지측).
+
+### D50. 현장 피드백 — 유입구분 '구디비' 추가 + 상담상태 신규 필드 + 유입코드 필터 동적화
+- **결정**: 정의현 차장 피드백 3건.
+  1. **유입구분 '구디비' 추가**: `INFLOW_TYPES` 에 '구디비' 추가(신규/하루전부재/하루전거절/이틀전/삼일전/구디비).
+  2. **상담상태(consult_status) 신규 필드**: `신규/결번/부재/가망/승인/통화예약/도입거절/일반거절/기타`. 라이브 `members.consult_status text` 컬럼 추가(apply_migration `add_members_consult_status`). 회원 등록 폼·상세(빠른액션 인라인+기본정보)·테이블 인라인 컬럼·임포트 매핑·이용자 필터(?cs=) 전반 반영. 신규 등록 기본값 '신규'.
+  3. **유입코드 필터 동적화**: 기존 하드코딩(NAVER/KAKAO 6종) → **실제 데이터의 distinct inflow_code**로 채움(`useInflowCodes`/`supa.fetchInflowCodes`). 라이브 실데이터는 secret·dc-news·l1·kp 등 다수 코드라 하드코딩으론 필터 불가였음(빨간박스 미동작 원인).
+- **이유**: 라이브 데이터 확인 결과 inflow_code 가 임포트 배치별 실코드 다수(고정 목록 불가) → 동적화가 정답. consult_status 는 텔레마케팅 콜 결과 추적 핵심 필드라 실컬럼으로(필터/리포트 대비). 유입구분은 고정 카테고리라 드롭다운 유지.
+- **영향**: 라이브 마이그레이션 적용 완료(nullable, 기존행 영향 없음). `DB_VERSION` 11→12 재시드(consult_status 분포 + 구디비). `tsc`·`vite build` 통과. mock E2E — 유입코드 동적(BANNER/FB/KAKAO/NAVER/REF/TOSS), 유입구분 구디비 포함, 상담상태 9종 필터(`?cs=가망` 27건 정합)·인라인 컬럼·등록폼 확인, 콘솔 에러 0. **TODO(live-verify)**: 기존 라이브 회원 consult_status=null(신규 입력부터 채워짐, 필요시 일괄 '신규' 백필)·유입구분 옛 채널명 데이터 잔존(점진 정리).

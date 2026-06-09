@@ -22,6 +22,7 @@ import type { Grade, MemberStatus } from '@/types/db'
 import {
   useMembers,
   useMemberViewCounts,
+  useInflowCodes,
   useUpdateMember,
   useAssignStaff,
   useResetAssign,
@@ -29,6 +30,7 @@ import {
 } from './api'
 import {
   getView,
+  CONSULT_STATUSES,
   INFLOW_TYPES,
   MORE_VIEWS,
   PAGE_SIZE_OPTIONS,
@@ -45,7 +47,6 @@ import { ImportMembersModal } from './ImportMembersModal'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
 const STATUSES: MemberStatus[] = ['active', 'suspended', 'deleted', 'withdrawn']
-const INFLOW_CODES = ['NAVER', 'FB', 'KAKAO', 'TOSS', 'REF', 'BANNER']
 const GROUP_ORDER: ViewGroup[] = ['상태', '등급', '담당', '유입', '운영']
 
 const selectCls =
@@ -77,6 +78,7 @@ export function MembersPage() {
   const staffF = get('staff')
   const inflowF = get('inflow')
   const inflowTypeF = get('it')
+  const consultF = get('cs')
 
   const extra: MemberFilter = {
     grade: gradeF,
@@ -84,6 +86,7 @@ export function MembersPage() {
     assignedStaffId: staffF,
     inflowCode: inflowF,
     inflowType: inflowTypeF,
+    consultStatus: consultF,
   }
 
   const query: MembersQuery = {
@@ -98,6 +101,7 @@ export function MembersPage() {
 
   const { data, isLoading, isFetching } = useMembers(query)
   const { data: counts } = useMemberViewCounts()
+  const { data: inflowCodes = [] } = useInflowCodes()
 
   const updateMember = useUpdateMember()
   const assignStaff = useAssignStaff()
@@ -120,6 +124,8 @@ export function MembersPage() {
           staffId
             ? assignStaff.mutate({ ids: [id], staffId })
             : resetAssign.mutate({ ids: [id] }),
+        onChangeConsult: (id, consult) =>
+          updateMember.mutate({ id, patch: { consult_status: consult || null } }),
       }),
     // mutate 함수는 안정적 — pageOffset/옵션/역할 변경 시에만 재생성
     [pageOffset, staffOptions, role], // eslint-disable-line react-hooks/exhaustive-deps
@@ -158,6 +164,8 @@ export function MembersPage() {
   if (inflowF) chips.push({ key: 'inflow', label: `유입코드: ${inflowF}`, onRemove: () => remove('inflow') })
   if (inflowTypeF)
     chips.push({ key: 'it', label: `유입구분: ${inflowTypeF}`, onRemove: () => remove('it') })
+  if (consultF)
+    chips.push({ key: 'cs', label: `상담상태: ${consultF}`, onRemove: () => remove('cs') })
 
   const clearAll = () => clear(['view'])
 
@@ -243,7 +251,7 @@ export function MembersPage() {
         chips={chips}
         onClearAll={chips.length > 0 ? clearAll : undefined}
       >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Field label="등급">
             <select
               className={selectCls}
@@ -293,11 +301,14 @@ export function MembersPage() {
               onChange={(e) => set('inflow', e.target.value || null, { resetPage: true })}
             >
               <option value="">전체</option>
-              {INFLOW_CODES.map((c) => (
+              {/* 실제 데이터에 존재하는 유입코드만 노출(현장 피드백) */}
+              {inflowCodes.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
               ))}
+              {/* 현재 선택값이 목록에 없으면(스코프 밖 등) 칩 정합 위해 노출 */}
+              {inflowF && !inflowCodes.includes(inflowF) && <option value={inflowF}>{inflowF}</option>}
             </select>
           </Field>
           <Field label="유입구분">
@@ -310,6 +321,20 @@ export function MembersPage() {
               {INFLOW_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {t}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="상담상태">
+            <select
+              className={selectCls}
+              value={consultF ?? ''}
+              onChange={(e) => set('cs', e.target.value || null, { resetPage: true })}
+            >
+              <option value="">전체</option>
+              {CONSULT_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>

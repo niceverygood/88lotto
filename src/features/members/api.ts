@@ -97,6 +97,7 @@ export interface MemberPatch {
   status?: MemberStatus
   memo?: string | null
   tendency?: string | null
+  consult_status?: string | null
   outcall_done?: boolean
 }
 
@@ -189,6 +190,23 @@ export function useMemberViewCounts() {
         return countsFrom(base, roleMap)
       }
       return countsFrom(scopeMembers(readDb().members, user), staffRoleById())
+    },
+  })
+}
+
+/** 실제 데이터에 존재하는 유입코드 목록(역할 스코프, 중복 제거·정렬) — 필터 드롭다운용(현장 피드백). */
+export function useInflowCodes() {
+  const user = useCurrentUser()
+  return useQuery({
+    queryKey: ['inflow-codes', user?.id ?? 'anon', user?.role ?? 'none'],
+    queryFn: async (): Promise<string[]> => {
+      const codes =
+        dataSource === 'supabase'
+          ? await supa.fetchInflowCodes()
+          : scopeMembers(readDb().members, user)
+              .map((m) => m.inflow_code)
+              .filter((c): c is string => !!c && c.trim().length > 0)
+      return Array.from(new Set(codes)).sort((a, b) => a.localeCompare(b, 'ko'))
     },
   })
 }
@@ -441,6 +459,7 @@ export interface MemberCreateInput {
   grade?: Grade
   inflow_code?: string | null
   inflow_type?: string | null
+  consult_status?: string | null
   tendency?: string | null
   memo?: string | null
   assigned_staff_id?: string | null
@@ -462,6 +481,7 @@ function buildLeadMember(
     grade: input.grade ?? 'free',
     status: 'active',
     tendency: input.tendency?.trim() || null,
+    consult_status: input.consult_status?.trim() || '신규',
     inflow_code: input.inflow_code?.trim() || null,
     inflow_type: input.inflow_type?.trim() || null,
     assigned_staff_id: opts.staff?.id ?? null,

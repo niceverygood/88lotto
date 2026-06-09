@@ -63,6 +63,7 @@ export function ImportMembersModal({ onClose }: { onClose: () => void }) {
         phone: cell(row, 'phone'),
         inflow_code: cell(row, 'inflow_code') || defInflowCode || null,
         inflow_type: cell(row, 'inflow_type') || defInflowType || null,
+        consult_status: cell(row, 'consult_status') || null,
         tendency: cell(row, 'tendency') || null,
         nickname: cell(row, 'nickname') || null,
         memo: cell(row, 'memo') || null,

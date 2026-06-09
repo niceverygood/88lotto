@@ -60,6 +60,7 @@ export interface Member {
   grade: Grade
   status: MemberStatus
   tendency: string | null // 성향
+  consult_status: string | null // 상담상태(신규/결번/부재/가망/승인/통화예약/도입거절/일반거절/기타)
   inflow_code: string | null
   inflow_type: string | null
   assigned_staff_id: string | null

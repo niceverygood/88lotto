@@ -20,6 +20,7 @@ export interface MemberFilter {
   tendency?: string
   inflowCode?: string
   inflowType?: string // 유입구분(콜 단계) 필터 — 현장 피드백
+  consultStatus?: string // 상담상태 필터 — 현장 피드백
   registeredToday?: boolean
   inactiveDays?: number // last_active 가 N일 이상 경과(또는 한 번도 미접속)
   dupInflow?: 'today' | 'all' // 동일 유입코드가 2건 이상
@@ -28,9 +29,23 @@ export interface MemberFilter {
 }
 
 // 유입구분(=유입분류) — 현장 피드백(2026-06): 채널명(네이버/카카오)이 아니라
-// "콜 단계" 분류로 운영한다. inflow_code(채널)와 별개. DECISIONS.md 참조.
-export const INFLOW_TYPES = ['신규', '하루전부재', '하루전거절', '이틀전', '삼일전'] as const
+// "콜 단계/DB구분" 분류로 운영한다. inflow_code(채널)와 별개. DECISIONS.md 참조.
+export const INFLOW_TYPES = ['신규', '하루전부재', '하루전거절', '이틀전', '삼일전', '구디비'] as const
 export type InflowType = (typeof INFLOW_TYPES)[number]
+
+// 상담상태 — 회원정보 입력/관리 시 콜 상담 결과(현장 피드백). 이용자 필터에도 사용.
+export const CONSULT_STATUSES = [
+  '신규',
+  '결번',
+  '부재',
+  '가망',
+  '승인',
+  '통화예약',
+  '도입거절',
+  '일반거절',
+  '기타',
+] as const
+export type ConsultStatus = (typeof CONSULT_STATUSES)[number]
 
 // 페이지당 행 수 옵션(현장 피드백) — 50 고정 → 선택형.
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500, 1000] as const
@@ -240,6 +255,7 @@ export function filterMembers(
     if (filter.tendency && m.tendency !== filter.tendency) return false
     if (filter.inflowCode && m.inflow_code !== filter.inflowCode) return false
     if (filter.inflowType && m.inflow_type !== filter.inflowType) return false
+    if (filter.consultStatus && m.consult_status !== filter.consultStatus) return false
     if (filter.registeredToday && !isSameDay(m.registered_at, ctx.now)) return false
     if (filter.inactiveDays !== undefined) {
       const last = m.last_active_at ? Date.parse(m.last_active_at) : null

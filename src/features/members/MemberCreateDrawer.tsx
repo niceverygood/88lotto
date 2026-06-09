@@ -9,7 +9,7 @@ import { GRADE_LABEL } from '@/design-system/labels'
 import { useStaff } from '@/lib/staff'
 import type { Grade } from '@/types/db'
 import { useCreateMember } from './api'
-import { INFLOW_TYPES } from './views'
+import { CONSULT_STATUSES, INFLOW_TYPES } from './views'
 
 const inputCls =
   'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none focus:border-primary-500'
@@ -35,6 +35,7 @@ const schema = z.object({
   phone: z.string().min(9, '휴대폰 번호를 입력하세요.'),
   inflow_code: z.string(),
   inflow_type: z.string(),
+  consult_status: z.string(),
   tendency: z.string(),
   grade: z.enum(['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']),
   assigned_staff_id: z.string(),
@@ -60,6 +61,7 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
       phone: '',
       inflow_code: '',
       inflow_type: INFLOW_TYPES[0], // 신규
+      consult_status: CONSULT_STATUSES[0], // 신규
       tendency: '',
       grade: 'free',
       assigned_staff_id: '',
@@ -82,6 +84,7 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
         grade: v.grade,
         inflow_code: v.inflow_code || null,
         inflow_type: v.inflow_type || null,
+        consult_status: v.consult_status || null,
         tendency: v.tendency || null,
         memo: v.memo || null,
         assigned_staff_id: v.assigned_staff_id || null,
@@ -163,6 +166,17 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
               ))}
             </select>
           </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>상담상태</label>
+          <select className={inputCls} {...register('consult_status')}>
+            {CONSULT_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

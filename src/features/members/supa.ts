@@ -65,6 +65,16 @@ export async function fetchMineMembers(uid: string): Promise<Member[]> {
 }
 
 /** assigned_staff_id → role 매핑(필터 ctx 용). roleScope 뷰(실장/팀장담당)가 사용. */
+/** 실제 데이터의 유입코드 distinct 목록(필터 드롭다운용). RLS 로 역할 스코프 자동 적용. */
+export async function fetchInflowCodes(): Promise<string[]> {
+  const { data, error } = await sb().from('members').select('inflow_code').not('inflow_code', 'is', null)
+  if (error) throw error
+  const codes = ((data ?? []) as { inflow_code: string | null }[])
+    .map((r) => r.inflow_code)
+    .filter((c): c is string => !!c && c.trim().length > 0)
+  return Array.from(new Set(codes))
+}
+
 export async function fetchStaffRoleMap(): Promise<Record<string, Role>> {
   const { data, error } = await sb().from('staff').select('id, role')
   if (error) throw error
@@ -167,6 +177,7 @@ export async function createMember(input: MemberCreateInput, actor: string | nul
     grade: input.grade ?? 'free',
     status: 'active',
     tendency: input.tendency?.trim() || null,
+    consult_status: input.consult_status?.trim() || '신규',
     inflow_code: input.inflow_code?.trim() || null,
     inflow_type: input.inflow_type?.trim() || null,
     assigned_staff_id: staff?.id ?? null,
@@ -245,6 +256,7 @@ export async function bulkImportMembers(
       grade: input.grade ?? 'free',
       status: 'active',
       tendency: input.tendency?.trim() || null,
+      consult_status: input.consult_status?.trim() || '신규',
       inflow_code: input.inflow_code?.trim() || null,
       inflow_type: input.inflow_type?.trim() || null,
       assigned_staff_id: sid,
