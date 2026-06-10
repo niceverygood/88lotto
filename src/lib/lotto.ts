@@ -1,6 +1,6 @@
 // 로또(6/45) 순수 도메인 로직 — React/UI 비의존. seed(lib) 와 features/lotto 가 함께 import 해
 // '시드 생성'과 '당첨 확정'이 동일한 규칙으로 등수/당첨금을 산정하도록 단일 출처로 둔다.
-import type { Grade, LottoRound } from '@/types/db'
+import type { Grade, LottoExcludeRule, LottoExcludeSettings, LottoRound, SiteSettings } from '@/types/db'
 
 export const LOTTO_MIN = 1
 export const LOTTO_MAX = 45
@@ -8,6 +8,28 @@ export const LOTTO_PICK = 6
 
 // 고정/제외수를 운영하는 등급(현장 피드백 2026-06): 골드·VIP·로얄 3등급만. 그 외는 '공통' 적용.
 export const LOTTO_RULE_GRADES: Grade[] = ['gold', 'vip', 'royal']
+
+function todayStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// 등급별 활성 고정/제외 규칙 = effective_from<=오늘 중 가장 최근. 해당 등급 규칙이 없으면
+// 공통(grade=null) → 그것도 없으면 레거시 lotto_exclude 스냅샷으로 폴백(현장 피드백).
+// lib 에 두는 이유: 추천(lotto)·수동발급(members) 두 feature 가 공유(§2 feature 간 직접 import 금지).
+export function resolveExcludeForGrade(
+  settings: Pick<SiteSettings, 'lotto_exclude' | 'lotto_exclude_history'>,
+  grade: Grade | null,
+): LottoExcludeSettings {
+  const today = todayStr()
+  const effective = (settings.lotto_exclude_history ?? [])
+    .filter((r) => r.effective_from <= today)
+    .sort((a, b) => b.effective_from.localeCompare(a.effective_from) || b.round_no - a.round_no)
+  const pick = (g: Grade | null): LottoExcludeRule | undefined =>
+    effective.find((r) => (r.grade ?? null) === g)
+  const rule = (grade != null ? pick(grade) : undefined) ?? pick(null)
+  return rule ? { fixed: rule.fixed, excluded: rule.excluded } : settings.lotto_exclude
+}
 
 /** 6개 번호 합. */
 export function lottoSum(numbers: readonly number[]): number {

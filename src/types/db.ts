@@ -19,7 +19,7 @@ export type PaymentStatus = 'wait' | 'approved' | 'failed' | 'cancelled'
 
 export type PaymentMethod = 'bank' | 'manual' | 'pg' // 무통장 | 수기 | PG
 
-export type SmsType = 'join' | 'recommend' | 'win' | 'marketing' // 가입·추천·당첨·마케팅
+export type SmsType = 'join' | 'recommend' | 'win' | 'marketing' | 'direct' // 가입·추천·당첨·마케팅·직접입력
 
 export type AssignType = 'manual' | 'auto'
 

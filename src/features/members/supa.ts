@@ -4,11 +4,14 @@
 //       쓰기는 mock 의 mutateDb 부수효과(§8)를 supabase 호출로 1:1 미러링한다.
 // TODO(live-verify): 대량(15만) 데이터에서는 목록을 server-side 필터/페이지네이션으로 이관해야 함.
 import { type SupabaseClient } from '@supabase/supabase-js'
-import type { Assignment, Member, MemberStatus, Payment, Product, Role, SmsSend, SmsTemplate } from '@/types/db'
+import type { Assignment, LottoRound, Member, MemberStatus, Payment, Product, Role, SiteSettings, SmsSend, SmsTemplate, WeeklyRecoIssue } from '@/types/db'
 import { supabase } from '@/lib/supabase'
 import { genId, nowIso } from '@/lib/db/store'
 import { renderSms, smsTypeForTemplate } from '@/lib/sms'
-import type { MemberCreateInput, MemberPatch, MySmsRow } from './api'
+import { sendOneShot } from '@/lib/oneshot'
+import { resolveExcludeForGrade } from '@/lib/lotto'
+import { generateRecommendation } from '@/lib/lottoGenerator'
+import type { ManualIssueInput, MemberCreateInput, MemberPatch, MySmsRow } from './api'
 
 function sb(): SupabaseClient {
   if (!supabase) throw new Error('supabase 클라이언트가 초기화되지 않았습니다.')
@@ -521,4 +524,90 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
   const { error: e2 } = await sb().from('sms_sends').insert(rows)
   if (e2) throw e2
   await pushLog({ kind: 'sms', actor, action: 'sms.send', target_type: 'member', target_id: null, meta: { count: ids.length, template: templateKey } })
+}
+
+// 사이트 설정의 문자(oneshot) 게이트 — 실발송 여부 판단용.
+async function fetchSmsConfig(): Promise<{ realSend: boolean; sender_no: string }> {
+  const { data } = await sb().from('site_settings').select('sms').eq('id', 1).maybeSingle()
+  const sms = (data as { sms: SiteSettings['sms'] } | null)?.sms
+  return { realSend: !!sms?.oneshot_enabled && !!sms.sender_no, sender_no: sms?.sender_no ?? '' }
+}
+
+/** 직접 입력 문자 발송(<회원정보창> 3) — 템플릿 없이 자유 본문. 실발송 게이트는 mock 과 동일. */
+export async function sendCustomSms(ids: string[], body: string, actor: string | null): Promise<void> {
+  const { data: memData, error: me } = await sb().from('members').select('id, phone').in('id', ids)
+  if (me) throw me
+  const members = (memData ?? []) as { id: string; phone: string }[]
+  const { realSend, sender_no } = await fetchSmsConfig()
+  const ts = nowIso()
+  const rows: SmsSend[] = []
+  for (const m of members) {
+    let status = '발송완료'
+    if (realSend) {
+      const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sender_no })
+      status = r.ok ? '발송완료' : '실패'
+    }
+    rows.push({
+      id: genId('sms'),
+      member_id: m.id,
+      template_key: null,
+      phone: m.phone,
+      body,
+      type: 'direct',
+      status,
+      sent_at: ts,
+    })
+  }
+  const { error } = await sb().from('sms_sends').insert(rows)
+  if (error) throw error
+  await pushLog({ kind: 'sms', actor, action: 'sms.send_direct', target_type: 'member', target_id: ids.length === 1 ? ids[0] : null, meta: { count: rows.length, real: realSend } })
+}
+
+/** 수동 조합 발급/발송(<회원정보창> 4) — mock useManualIssueReco 미러. */
+export async function manualIssueReco(
+  v: ManualIssueInput,
+  actor: string | null,
+): Promise<{ round_no: number; sets: number[][] }> {
+  const { data: mData } = await sb().from('members').select('id, grade, phone, meta').eq('id', v.memberId).maybeSingle()
+  const member = mData as { id: string; grade: Member['grade']; phone: string; meta: Record<string, unknown> | null } | null
+  if (!member) throw new Error('회원을 찾을 수 없습니다.')
+  const { data: sData, error: se } = await sb().from('site_settings').select('*').eq('id', 1).maybeSingle()
+  if (se) throw se
+  const settings = sData as SiteSettings
+  const { data: rData, error: re } = await sb().from('lotto_rounds').select('*')
+  if (re) throw re
+  const rounds = (rData ?? []) as LottoRound[]
+  const exclude = resolveExcludeForGrade(settings, member.grade)
+  const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
+  const res = generateRecommendation(rounds, exclude, { mode: 20, setCount: Math.max(1, v.setCount) })
+  const ts = nowIso()
+  const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }
+  const recos = Array.isArray(member.meta?.weekly_recos) ? (member.meta!.weekly_recos as WeeklyRecoIssue[]) : []
+  const meta = { ...(member.meta ?? {}), weekly_recos: [issue, ...recos].slice(0, 8) }
+  const { error: ue } = await sb().from('members').update({ meta }).eq('id', v.memberId)
+  if (ue) throw ue
+
+  if (v.alsoSms) {
+    const lines = res.sets.map((s, i) => `${i + 1}) ${s.join(' ')}`)
+    const body = `[플러스로또] ${targetRound}회 추천번호 ${res.sets.length}조합\n${lines.join('\n')}`
+    const { realSend, sender_no } = await fetchSmsConfig()
+    let status = '발송완료'
+    if (realSend) {
+      const r = await sendOneShot({ dest_phone: member.phone, msg_body: body, send_phone: sender_no })
+      status = r.ok ? '발송완료' : '실패'
+    }
+    const { error } = await sb().from('sms_sends').insert({
+      id: genId('sms'),
+      member_id: v.memberId,
+      template_key: 'recommend',
+      phone: member.phone,
+      body,
+      type: 'recommend',
+      status,
+      sent_at: ts,
+    })
+    if (error) throw error
+  }
+  await pushLog({ kind: 'admin', actor, action: 'reco.manual_issue', target_type: 'member', target_id: v.memberId, meta: { round_no: targetRound, set_count: res.sets.length, sms: v.alsoSms } })
+  return { round_no: targetRound, sets: res.sets }
 }

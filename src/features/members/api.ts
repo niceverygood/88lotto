@@ -2,7 +2,7 @@
 // 컴포넌트 직접 fetch 금지. 뮤테이션은 mock DB 를 변경하고 §8 흐름대로
 // 로그/배정/문자 부수효과를 만든 뒤 관련 쿼리를 무효화한다.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Grade, LogEntry, Member, MemberStatus, Payment, PaymentMethod, Role, SmsSend, Staff } from '@/types/db'
+import type { Grade, LogEntry, Member, MemberStatus, Payment, PaymentMethod, Role, SmsSend, Staff, WeeklyRecoIssue } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
 import { staffById, staffRoleById, assignableReps } from '@/lib/staff'
@@ -10,6 +10,8 @@ import { useCurrentUser, type CurrentUser } from '@/lib/auth'
 import { memberKeys, paymentKeys, revenueKeys, smsTemplateKeys } from '@/lib/queryKeys'
 import { renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
+import { resolveExcludeForGrade } from '@/lib/lotto'
+import { generateRecommendation } from '@/lib/lottoGenerator'
 import { filterMembers, getView, MEMBER_VIEWS, type MemberFilter } from './views'
 import * as supa from './supa'
 
@@ -922,6 +924,143 @@ export function useSendSms() {
       qc.invalidateQueries({ queryKey: memberKeys.all })
       qc.invalidateQueries({ queryKey: ['my-sms'] }) // 나의고객 문자내역(§8)
       for (const id of ids) qc.invalidateQueries({ queryKey: memberKeys.sms(id) })
+    },
+  })
+}
+
+// ── 직접 입력 문자 발송(현장 피드백 <회원정보창> 3) — 템플릿 없이 본문 자유 입력 ─────────
+export function useSendCustomSms() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: { ids: string[]; body: string }) => {
+      const body = v.body.trim()
+      if (!body) return v.ids
+      if (dataSource === 'supabase') {
+        await supa.sendCustomSms(v.ids, body, user?.id ?? null)
+        return v.ids
+      }
+      const cur = readDb()
+      const sms = cur.site_settings.sms
+      const realSend = !!sms?.oneshot_enabled && !!sms.sender_no
+      const targets = cur.members.filter((m) => v.ids.includes(m.id))
+      const ts = nowIso()
+      const records: SmsSend[] = []
+      for (const m of targets) {
+        let status = '발송완료'
+        if (realSend) {
+          const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sms.sender_no })
+          status = r.ok ? '발송완료' : '실패'
+        }
+        records.push({
+          id: genId('sms'),
+          member_id: m.id,
+          template_key: null,
+          phone: m.phone,
+          body,
+          type: 'direct',
+          status,
+          sent_at: ts,
+        })
+      }
+      mutateDb((db) => {
+        for (const rec of records) db.sms_sends.push(rec)
+        db.logs.push({
+          id: genId('log'),
+          kind: 'sms',
+          actor: user?.id ?? null,
+          action: 'sms.send_direct',
+          target_type: 'member',
+          target_id: v.ids.length === 1 ? v.ids[0] : null,
+          meta: { count: records.length, real: realSend },
+          created_at: ts,
+        })
+      })
+      return v.ids
+    },
+    onSuccess: (ids) => {
+      qc.invalidateQueries({ queryKey: memberKeys.all })
+      qc.invalidateQueries({ queryKey: ['my-sms'] })
+      for (const id of ids) qc.invalidateQueries({ queryKey: memberKeys.sms(id) })
+    },
+  })
+}
+
+// ── 수동 조합 발급/발송(현장 피드백 <회원정보창> 4) ────────────────────────────────
+// 회원 1명에게 즉시 조합을 생성·발급(발급번호 탭/홈페이지 노출). 옵션으로 문자 발송.
+export interface ManualIssueInput {
+  memberId: string
+  setCount: number
+  alsoSms: boolean // true 면 조합 본문을 문자로도 발송
+}
+
+function recoSmsBody(roundNo: number, sets: number[][]): string {
+  const lines = sets.map((s, i) => `${i + 1}) ${s.join(' ')}`)
+  return `[플러스로또] ${roundNo}회 추천번호 ${sets.length}조합\n${lines.join('\n')}`
+}
+
+export function useManualIssueReco() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: ManualIssueInput): Promise<{ round_no: number; sets: number[][] }> => {
+      if (dataSource === 'supabase') return supa.manualIssueReco(v, user?.id ?? null)
+      const cur = readDb()
+      const member = cur.members.find((m) => m.id === v.memberId)
+      if (!member) throw new Error('회원을 찾을 수 없습니다.')
+      const rounds = cur.lotto_rounds
+      const exclude = resolveExcludeForGrade(cur.site_settings, member.grade)
+      const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
+      const setCount = Math.max(1, v.setCount)
+      const res = generateRecommendation(rounds, exclude, { mode: 20, setCount })
+      const ts = nowIso()
+      const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }
+
+      // 문자 발송(옵션) — 직접 발송과 동일한 실발송 게이트.
+      const sms = cur.site_settings.sms
+      const realSend = !!sms?.oneshot_enabled && !!sms.sender_no
+      let smsStatus: string | null = null
+      if (v.alsoSms) {
+        smsStatus = '발송완료'
+        if (realSend) {
+          const r = await sendOneShot({
+            dest_phone: member.phone,
+            msg_body: recoSmsBody(targetRound, res.sets),
+            send_phone: sms.sender_no,
+          })
+          smsStatus = r.ok ? '발송완료' : '실패'
+        }
+      }
+
+      mutateDb((db) => {
+        const m = db.members.find((x) => x.id === v.memberId)
+        if (!m) return
+        const recos = Array.isArray(m.meta?.weekly_recos) ? (m.meta!.weekly_recos as WeeklyRecoIssue[]) : []
+        m.meta = { ...m.meta, weekly_recos: [issue, ...recos].slice(0, 8) }
+        if (v.alsoSms && smsStatus) {
+          db.sms_sends.push({
+            id: genId('sms'),
+            member_id: m.id,
+            template_key: 'recommend',
+            phone: m.phone,
+            body: recoSmsBody(targetRound, res.sets),
+            type: 'recommend',
+            status: smsStatus,
+            sent_at: ts,
+          })
+        }
+        db.logs.push(adminLog(user?.id ?? null, 'reco.manual_issue', v.memberId, {
+          round_no: targetRound,
+          set_count: res.sets.length,
+          sms: v.alsoSms,
+        }))
+      })
+      return { round_no: targetRound, sets: res.sets }
+    },
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: memberKeys.detail(v.memberId) })
+      qc.invalidateQueries({ queryKey: memberKeys.sms(v.memberId) })
+      qc.invalidateQueries({ queryKey: ['weekly-free-reco-status'] })
     },
   })
 }

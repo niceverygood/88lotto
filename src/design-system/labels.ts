@@ -41,4 +41,5 @@ export const SMS_TYPE_LABEL: Record<SmsType, string> = {
   recommend: '추천',
   win: '당첨',
   marketing: '마케팅',
+  direct: '직접입력',
 }
