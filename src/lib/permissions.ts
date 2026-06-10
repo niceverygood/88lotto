@@ -25,11 +25,13 @@ export const MODULE_LABEL: Record<NavKey, string> = {
 
 export const ROLE_ORDER: Role[] = ['admin', 'manager', 'leader', 'rep']
 
+// 명칭변경(현장 피드백 2026-06): admin=최고관리자 > manager=관리자 > leader=실장 > rep=팀장.
+// 내부 role 키(admin/manager/leader/rep)는 그대로, 표시 라벨만 변경한다.
 export const ROLE_LABEL: Record<Role, string> = {
-  admin: '관리자',
-  manager: '실장',
-  leader: '팀장',
-  rep: '담당자',
+  admin: '최고관리자',
+  manager: '관리자',
+  leader: '실장',
+  rep: '팀장',
 }
 
 // 자기잠금 방지: admin 은 이 모듈 접근을 항상 보유(매트릭스에서 해제 불가).

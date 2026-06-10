@@ -15,10 +15,10 @@ interface DemoAccount {
 
 // mock 데모 계정 (seed staff 와 일치). 실 Supabase 전환 시 노출 안 됨.
 const DEMO_ACCOUNTS: DemoAccount[] = [
-  { role: 'admin', label: '관리자', loginId: 'admin01' },
-  { role: 'manager', label: '실장', loginId: 'two001' },
-  { role: 'leader', label: '팀장', loginId: 'leader01' },
-  { role: 'rep', label: '담당자', loginId: 'rep01' },
+  { role: 'admin', label: '최고관리자', loginId: 'admin01' },
+  { role: 'manager', label: '관리자', loginId: 'two001' },
+  { role: 'leader', label: '실장', loginId: 'leader01' },
+  { role: 'rep', label: '팀장', loginId: 'rep01' },
 ]
 
 export function LoginPage() {

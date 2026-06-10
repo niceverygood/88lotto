@@ -195,8 +195,12 @@ export function memberColumns(ctx: MemberColumnsCtx): ColumnDef<Member>[] {
   ]
 }
 
-/** 역할별 기본 컬럼 노출. rep 은 본인 담당만 보므로 '담당' 컬럼 숨김. */
+/** 역할별 기본 컬럼 노출(현장 피드백).
+ * - 유입(유입코드/유입구분)은 최고관리자(admin)만 노출 → 그 외 숨김.
+ * - 팀장(rep)은 본인 담당만 보므로 '담당' 컬럼 숨김. */
 export function memberColumnVisibility(role: Role | null): VisibilityState {
-  if (role === 'rep') return { staff: false }
-  return {}
+  const v: VisibilityState = {}
+  if (role !== 'admin') v.inflow = false // 유입코드/유입구분 숨김
+  if (role === 'rep') v.staff = false
+  return v
 }

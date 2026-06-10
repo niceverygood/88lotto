@@ -118,7 +118,7 @@ export function MembersPage() {
       memberColumns({
         pageOffset,
         staffOptions,
-        canEditStaff: role !== 'rep',
+        canEditStaff: role === 'admin', // 담당자 변경은 최고관리자만(현장 피드백)
         onChangeStatus: (id, status) => updateMember.mutate({ id, patch: { status } }),
         onChangeStaff: (id, staffId) =>
           staffId
@@ -175,7 +175,8 @@ export function MembersPage() {
         title="이용자"
         description="회원 세그먼트 관리 · 담당 배정 · 문자 발송"
         actions={
-          role !== 'rep' ? (
+          // 디비 입력(신규 등록·일괄 임포트)은 최고관리자만(현장 피드백)
+          role === 'admin' ? (
             <>
               <Button variant="sec" size="sm" onClick={() => setImporting(true)}>
                 <Upload className="h-4 w-4" /> 일괄 임포트
@@ -294,37 +295,42 @@ export function MembersPage() {
               ))}
             </select>
           </Field>
-          <Field label="유입코드">
-            <select
-              className={selectCls}
-              value={inflowF ?? ''}
-              onChange={(e) => set('inflow', e.target.value || null, { resetPage: true })}
-            >
-              <option value="">전체</option>
-              {/* 실제 데이터에 존재하는 유입코드만 노출(현장 피드백) */}
-              {inflowCodes.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-              {/* 현재 선택값이 목록에 없으면(스코프 밖 등) 칩 정합 위해 노출 */}
-              {inflowF && !inflowCodes.includes(inflowF) && <option value={inflowF}>{inflowF}</option>}
-            </select>
-          </Field>
-          <Field label="유입구분">
-            <select
-              className={selectCls}
-              value={inflowTypeF ?? ''}
-              onChange={(e) => set('it', e.target.value || null, { resetPage: true })}
-            >
-              <option value="">전체</option>
-              {INFLOW_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </Field>
+          {/* 유입코드/유입구분은 최고관리자만(현장 피드백) */}
+          {role === 'admin' && (
+            <>
+              <Field label="유입코드">
+                <select
+                  className={selectCls}
+                  value={inflowF ?? ''}
+                  onChange={(e) => set('inflow', e.target.value || null, { resetPage: true })}
+                >
+                  <option value="">전체</option>
+                  {/* 실제 데이터에 존재하는 유입코드만 노출(현장 피드백) */}
+                  {inflowCodes.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                  {/* 현재 선택값이 목록에 없으면(스코프 밖 등) 칩 정합 위해 노출 */}
+                  {inflowF && !inflowCodes.includes(inflowF) && <option value={inflowF}>{inflowF}</option>}
+                </select>
+              </Field>
+              <Field label="유입구분">
+                <select
+                  className={selectCls}
+                  value={inflowTypeF ?? ''}
+                  onChange={(e) => set('it', e.target.value || null, { resetPage: true })}
+                >
+                  <option value="">전체</option>
+                  {INFLOW_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </>
+          )}
           <Field label="상담상태">
             <select
               className={selectCls}
