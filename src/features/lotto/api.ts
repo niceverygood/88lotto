@@ -25,16 +25,22 @@ export interface RoundRow extends LottoRound {
   betCount: number
   winnerCount: number // 등수 있는 베팅 수(확정 회차)
   prizeSum: number // 당첨금 합계
+  rankCounts: [number, number, number, number, number] // 1~5등 당첨 건수(회차별 누적 기록)
 }
 
 export type RoundFilter = 'all' | 'confirmed' | 'pending'
 
-function aggregateBets(bets: readonly Bet[]): Map<number, { count: number; winners: number; prize: number }> {
-  const m = new Map<number, { count: number; winners: number; prize: number }>()
+type BetAgg = { count: number; winners: number; prize: number; ranks: [number, number, number, number, number] }
+
+function aggregateBets(bets: readonly Bet[]): Map<number, BetAgg> {
+  const m = new Map<number, BetAgg>()
   for (const b of bets) {
-    const cur = m.get(b.round_no) ?? { count: 0, winners: 0, prize: 0 }
+    const cur = m.get(b.round_no) ?? { count: 0, winners: 0, prize: 0, ranks: [0, 0, 0, 0, 0] as BetAgg['ranks'] }
     cur.count += 1
-    if (b.rank != null) cur.winners += 1
+    if (b.rank != null) {
+      cur.winners += 1
+      if (b.rank >= 1 && b.rank <= 5) cur.ranks[b.rank - 1] += 1
+    }
     cur.prize += b.prize ?? 0
     m.set(b.round_no, cur)
   }
@@ -56,6 +62,7 @@ export function useRounds(filter: RoundFilter = 'all') {
           betCount: a?.count ?? 0,
           winnerCount: a?.winners ?? 0,
           prizeSum: a?.prize ?? 0,
+          rankCounts: a?.ranks ?? [0, 0, 0, 0, 0],
         }
       })
       if (filter === 'confirmed') rows = rows.filter((r) => r.confirmed_at != null)

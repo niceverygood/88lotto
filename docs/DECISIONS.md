@@ -328,3 +328,11 @@
   - **구조**: `resolveExcludeForGrade` 를 features/lotto/api → **lib/lotto.ts 로 이동**(members 모듈과 공유, §2 feature 간 직접 import 금지 — lotto/api 는 재노출로 기존 import 호환).
 - **이유**: 담당이 템플릿 외 상담 문자를 즉석 발송, 유료회원 등 개별 회원에게 조합을 수동으로 발급·문자 전달(주간 자동발급과 별개 운영 플로우).
 - **영향**: `tsc`·`vite build` 통과. mock E2E(팀장 rep01) — 직접 발송 → 문자내역 '직접입력' 기록, 수동 발급 5세트 → 1181회 발급(전 세트 고정수 7=공통 규칙)+추천 SMS 기록, 콘솔 에러 0. **TODO(live-verify)**: ① 기존 `supa.sendSms`(템플릿 발송 live 경로)는 기록만 하고 실발송 미호출 — sendCustomSms/manualIssueReco 는 실발송 게이트 포함으로 구현했으니 템플릿 경로도 정합 필요 ② 수동 발급 권한 범위(현재 상세 접근 가능 전 역할) ③ 조합 LMS 길이(30세트 문자 발송 시 2,000byte 초과 가능 — 분할 발송 검토).
+
+### D54. 고객 포털(/portal) 최소버전 + 금 09:00 자동발급 크론 — 라이브 게이트 2종 해소
+- **결정**: 남은 외부 게이트 2종을 본 레포 안에서 해결(차장 "모두 진행" 승인).
+  - **고객 포털**: 공개 라우트 `/portal`(셸·staff 인증 밖) — 전화번호+비밀번호(기본 뒷4자리, meta.homepage_pw 우선) 로그인 → 본인 발급번호(회차·세트 LottoBalls) 조회. 모바일 우선 단일 카드 UI. 라이브 인증은 **security-definer RPC `portal_member_recos(p_phone,p_pw)`**(anon 실행 허용, 자격 일치 시 name/grade/recos 만 반환 — members RLS 우회 최소화). mock 은 동일 규칙 로컬 검증. 풀 홈페이지(분석/멤버십/고객센터, ilhanglotto 참고)는 후속 — 현재는 최소 '내 번호 확인'.
+  - **자동발급 크론**: `api/weekly-reco.ts`(Vercel 함수) + `vercel.json crons`(매일 00:00 UTC=09:00 KST). 매일 돌며 **회원별 발송요일(meta.weekly_reco_day, 기본 금=5)이 오늘(KST)인 무료회원**에게 발급 — 회원별 갯수 override·회차 멱등·`reco.weekly_issue`(channel=cron) 로그. `?force=1` 수동 트리거. 보안: `CRON_SECRET` Bearer 검증(Vercel 크론 자동 첨부). env `SUPABASE_SERVICE_ROLE_KEY`·`CRON_SECRET` 프로덕션 등록 완료.
+  - **구조**: `lib/lotto`·`lib/lottoGenerator` 의 `@/types/db` import 를 상대경로로 변경(api/ 함수가 alias 없이 동일 생성 로직 번들 — 콘솔·크론 단일 출처 유지).
+- **이유**: 6/14 데드라인 — 별도 프론트/인프라 없이 기존 Vercel 프로젝트 안에서 포털·크론 모두 충족. RPC 방식이라 향후 독립 홈페이지(별도 도메인)로 분리해도 동일 API 재사용.
+- **영향**: 라이브 RPC 검증(정상 로그인 true/오답 거부/미등록 거부). mock E2E — /portal 로그인(변경비번 8888 통과·기본값 거부) → '1181회 추천번호 5조합' 표시, 콘솔 에러 0. `tsc`·`vite build` 통과. **TODO(live-verify)**: ① 배포 후 `force=1` 실발급 1회 검증 ② 포털 rate-limit(현재 없음 — 무차별 대입은 RPC 자격검증만, 필요시 edge rate limit) ③ Vercel Hobby 크론은 일 1회·정시 ±1h 허용 오차 ④ 전화번호 중복 회원은 최신 가입 1명 기준.

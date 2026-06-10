@@ -12,8 +12,11 @@ import { lottoSum, oddEven, LOTTO_RULE_GRADES } from '@/lib/lotto'
 import { GRADE_LABEL } from '@/design-system/labels'
 import type { Grade } from '@/types/db'
 import {
+  EXCLUSION_MODE_MAX,
+  EXCLUSION_MODE_MIN,
   EXCLUSION_RULE_LABEL,
   MODE_OPTIONS,
+  clampExclusionMode,
   generateRecommendation,
   type ExclusionMode,
   type ExclusionRuleKey,
@@ -210,7 +213,7 @@ export function RecommendPage() {
           <div className="border-t border-gray-100 px-4 py-3.5 text-[12.5px] leading-relaxed text-ink-700">
             <p className="mb-3 text-gray-600">
               과거 회차 통계로 <b>제외수</b>를 산정하고, 남은 번호 풀에서 패턴 품질을 통과한 6/45 조합만
-              제시합니다. 제외수 개수(10·15·20)는 위 컨트롤에서 선택합니다.
+              제시합니다. 제외수 개수는 프리셋(10·15·20) 또는 직접 입력(1~39)으로 지정합니다.
             </p>
 
             <h4 className="mb-2 text-[12px] font-bold text-ink-900">1. 제외수 산정 규칙</h4>
@@ -276,20 +279,38 @@ export function RecommendPage() {
 
         <div>
           <div className="mb-1 text-[11.5px] font-semibold text-gray-500">제외수 개수</div>
-          <div className="inline-flex rounded-md border border-gray-200 p-0.5">
-            {MODE_OPTIONS.map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={cn(
-                  'rounded px-3 py-1.5 text-[12.5px] font-semibold tabular-nums transition',
-                  mode === m ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100',
-                )}
-              >
-                {m}개
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            <div className="inline-flex rounded-md border border-gray-200 p-0.5">
+              {MODE_OPTIONS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
+                  className={cn(
+                    'rounded px-3 py-1.5 text-[12.5px] font-semibold tabular-nums transition',
+                    mode === m ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100',
+                  )}
+                >
+                  {m}개
+                </button>
+              ))}
+            </div>
+            {/* 임의 개수 입력(현장 피드백) — 1~39개(6개 조합이 남도록). */}
+            <input
+              type="number"
+              min={EXCLUSION_MODE_MIN}
+              max={EXCLUSION_MODE_MAX}
+              value={mode}
+              onChange={(e) => setMode(clampExclusionMode(Number(e.target.value)))}
+              aria-label="제외수 개수 직접 입력"
+              className={cn(
+                'h-[34px] w-[72px] rounded-md border px-2 text-center font-mono text-[12.5px] tnum focus:outline-none',
+                MODE_OPTIONS.includes(mode)
+                  ? 'border-gray-200 text-gray-600'
+                  : 'border-primary-400 bg-primary-50 font-bold text-primary-700',
+              )}
+            />
+            <span className="text-[11.5px] text-gray-400">개 (직접 입력 1~{EXCLUSION_MODE_MAX})</span>
           </div>
         </div>
 

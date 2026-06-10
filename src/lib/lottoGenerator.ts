@@ -20,7 +20,17 @@
 import type { LottoExcludeSettings, LottoRound } from '@/types/db'
 import { LOTTO_MAX, LOTTO_MIN, LOTTO_PICK } from './lotto'
 
-export type ExclusionMode = 10 | 15 | 20
+// 제외수 개수 — 10/15/20 프리셋 외에 임의 개수 입력 가능(현장 피드백).
+// 6개 조합이 남아야 하므로 1..(45-6)=39 로 클램프한다.
+export type ExclusionMode = number
+
+export const EXCLUSION_MODE_MIN = 1
+export const EXCLUSION_MODE_MAX = LOTTO_MAX - LOTTO_PICK // 39
+
+export function clampExclusionMode(n: number): number {
+  if (!Number.isFinite(n)) return 20
+  return Math.min(EXCLUSION_MODE_MAX, Math.max(EXCLUSION_MODE_MIN, Math.round(n)))
+}
 
 export interface GenerateOptions {
   mode: ExclusionMode
@@ -64,11 +74,22 @@ const ALL_NUMBERS: readonly number[] = Array.from(
   (_, i) => i + LOTTO_MIN,
 )
 
-// 각 모드별 규칙 배분(문서 '결과값' 20개 기준: 3+1+7+7+2=20). 10·15는 상위 압축.
-const RULE_QUOTA: Record<ExclusionMode, { month: number; freq: number }> = {
+// 규칙 배분(문서 '결과값' 20개 기준: 3+1+7+7+2=20). 10·15·20은 원본 표 그대로,
+// 그 외 임의 개수는 같은 비율(직전3+보너스1 제외분을 월별·빈도에 균분)로 산정한다.
+const RULE_QUOTA_PRESET: Record<number, { month: number; freq: number }> = {
   10: { month: 4, freq: 4 }, // 직전3·보너스1 + 월별4·빈도4 − 압축 = 상위 10
   15: { month: 5, freq: 6 },
   20: { month: 7, freq: 7 },
+}
+
+function ruleQuota(mode: number): { month: number; freq: number } {
+  const preset = RULE_QUOTA_PRESET[mode]
+  if (preset) return preset
+  // 직전회차(3)+보너스(1) 후보를 제외한 나머지를 월별/빈도에 반씩 배분.
+  const rest = Math.max(2, mode - 4)
+  const month = Math.max(1, Math.floor(rest / 2))
+  const freq = Math.max(1, rest - month)
+  return { month, freq }
 }
 
 // ── PRNG (mulberry32) — 시드 가능한 결정적 난수 ─────────────────────────
@@ -170,7 +191,7 @@ export function computeExclusions(
   const desc = sortedRoundsDesc(rounds)
   const prev = desc[0] ?? null
   const fixedSet = new Set(manual.fixed)
-  const quota = RULE_QUOTA[mode]
+  const quota = ruleQuota(mode)
   const cands: Candidate[] = []
 
   // ① 직전회차 상위2·하위1
@@ -228,7 +249,7 @@ export function computeExclusions(
   }
   const compressed = [...best.values()]
     .sort((a, b) => b.priority - a.priority || b.score - a.score)
-    .slice(0, mode)
+    .slice(0, clampExclusionMode(mode))
 
   // 수동 제외(고정수와 겹치면 고정수 우선) 병합.
   const reasons: ExclusionReason[] = []

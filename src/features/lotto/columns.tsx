@@ -111,6 +111,25 @@ export function lottoColumns(ctx: LottoColumnsCtx): ColumnDef<RoundRow>[] {
       },
     },
     {
+      id: 'rankCounts',
+      header: '등수별 당첨(1~5등)',
+      enableSorting: false,
+      meta: { align: 'right' },
+      cell: (info) => {
+        const r = info.row.original
+        if (!r.confirmed_at) return <span className="text-gray-300">-</span>
+        return (
+          <span className="font-mono text-[12px] tnum text-gray-600">
+            {r.rankCounts.map((c, i) => (
+              <span key={i} className={cn('ml-1.5 first:ml-0', c > 0 && 'font-bold text-success')}>
+                {i + 1}등 {num(c)}
+              </span>
+            ))}
+          </span>
+        )
+      },
+    },
+    {
       id: 'status',
       header: '상태',
       enableSorting: false,
