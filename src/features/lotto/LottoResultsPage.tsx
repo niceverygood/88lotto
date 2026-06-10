@@ -3,11 +3,12 @@
 // 행 클릭 → /bets?round=N 으로 이동해 해당 회차 베팅을 필터링(검수 항목).
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Download, Plus } from 'lucide-react'
 import { Button, ConfirmModal, DataTable, PageHeader, Tabs, type TabItem } from '@/design-system/components'
 import { usePageMeta } from '@/app/uiStore'
 import { useUrlFilters } from '@/lib/useUrlFilters'
-import { num } from '@/lib/format'
+import { date, num } from '@/lib/format'
+import { downloadCsv } from '@/lib/csv'
 import { useConfirmRound, useRounds, type RoundFilter } from './api'
 import { lottoColumns } from './columns'
 import { RoundFormModal } from './RoundFormModal'
@@ -40,6 +41,31 @@ export function LottoResultsPage() {
 
   const tabs: TabItem[] = FILTER_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] }))
 
+  // 로또기록 엑셀(CSV) 다운로드 — 현재 필터 기준, 등수별(1~5등) 누적 건수 포함.
+  const onDownloadCsv = () => {
+    downloadCsv(
+      `로또기록_${new Date().toISOString().slice(0, 10)}.csv`,
+      ['회차', '추첨일', '당첨번호', '보너스', '합', '홀짝', '1등 당첨금', '2등 당첨금', '3등 당첨금',
+       '총판매금액', '베팅수', '당첨수', '1등', '2등', '3등', '4등', '5등', '상태'],
+      rows.map((r) => [
+        r.round_no,
+        date(r.draw_date),
+        r.numbers.join(' '),
+        r.bonus,
+        r.sum,
+        r.odd_even,
+        r.prize_1 ?? 0,
+        r.prize_2 ?? 0,
+        r.prize_3 ?? 0,
+        r.total_sales ?? 0,
+        r.betCount,
+        r.winnerCount,
+        ...r.rankCounts,
+        r.confirmed_at ? '확정' : '미확정',
+      ]),
+    )
+  }
+
   const onConfirmRound = () => {
     if (confirmNo == null) return
     confirmRound.mutate(
@@ -54,9 +80,19 @@ export function LottoResultsPage() {
         title="로또기록"
         description="회차별 당첨번호 · 1·2·3등 당첨금 · 총판매금액. 당첨 확정 시 베팅 등수/당첨금 산정(§8)."
         actions={
-          <Button variant="pri" icon={<Plus className="h-4 w-4" />} onClick={() => setRegisterOpen(true)}>
-            회차 등록
-          </Button>
+          <>
+            <Button
+              variant="gho"
+              icon={<Download className="h-4 w-4" />}
+              onClick={onDownloadCsv}
+              disabled={rows.length === 0}
+            >
+              엑셀 다운로드
+            </Button>
+            <Button variant="pri" icon={<Plus className="h-4 w-4" />} onClick={() => setRegisterOpen(true)}>
+              회차 등록
+            </Button>
+          </>
         }
       />
 

@@ -25,9 +25,10 @@ import { ReportSettingsPage } from '@/features/settings/ReportSettingsPage'
 import { LottoExcludePage } from '@/features/settings/LottoExcludePage'
 import { TermsSettingsPage } from '@/features/settings/TermsSettingsPage'
 import { ComponentsPage } from '@/features/dev/ComponentsPage'
+import { PortalPage } from '@/features/portal/PortalPage'
 
 /**
- * 라우트 정의. /login 은 셸 밖, 그 외는 RequireAuth 로 보호.
+ * 라우트 정의. /login·/portal(고객 홈페이지) 은 셸 밖, 그 외는 RequireAuth 로 보호.
  * 모듈 라우트는 권한 매트릭스(nav_access) 기반 RequireNav 로 가드(§5) — 메뉴 숨김과 동일 기준.
  * 대시보드는 리다이렉트 폴백이므로 가드하지 않는다.
  */
@@ -35,6 +36,8 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* 고객 홈페이지(공개) — 전화번호/뒷4자리 로그인, 본인 발급번호 조회(현장 피드백) */}
+      <Route path="/portal" element={<PortalPage />} />
       <Route
         element={
           <RequireAuth>
