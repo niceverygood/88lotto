@@ -596,7 +596,7 @@ function buildSiteSettings(): SiteSettings {
       // 등급별 규칙 시연(VIP): 공통과 다른 고정/제외
       { id: 'lxr_1180_vip', round_no: 1180, grade: 'vip', fixed: [17], excluded: [1, 45], effective_from: '2026-05-25', created_at: '2026-05-23T02:05:00.000Z', created_by: 'staff-admin' },
     ],
-    weekly_free_reco: { enabled: true, set_count: 30 },
+    weekly_free_reco: { enabled: true, set_count: 30, logic_ratio: 100 },
     terms: [
       '제1조 (목적)',
       '본 약관은 플러스로또(이하 "회사")가 제공하는 로또 번호 추천 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.',

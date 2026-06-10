@@ -24,10 +24,10 @@ import {
 } from '@/lib/lottoGenerator'
 import {
   resolveExcludeForGrade,
-  useIssueWeeklyFreeReco,
+  useIssueGradeReco,
   useLottoExclude,
   useRounds,
-  useWeeklyFreeRecoStatus,
+  useWeeklyRecoStatus,
   WEEKLY_FREE_RECO_DEFAULT,
 } from './api'
 
@@ -73,8 +73,10 @@ export function RecommendPage() {
   const role = useRole()
   const { data: rounds = [], isLoading } = useRounds('all')
   const { data: settings } = useLottoExclude()
-  const { data: freeStatus } = useWeeklyFreeRecoStatus()
-  const issueWeekly = useIssueWeeklyFreeReco()
+  // 발급 카드 — 등급 선택 후 그 등급 회원 전체에 일괄 발급(<추천번호> 4).
+  const [issueGrade, setIssueGrade] = useState<Grade>('free')
+  const { data: recoStatus } = useWeeklyRecoStatus(issueGrade)
+  const issueReco = useIssueGradeReco()
   const [confirmIssue, setConfirmIssue] = useState(false)
   const [issueMsg, setIssueMsg] = useState<string | null>(null)
 
@@ -114,32 +116,44 @@ export function RecommendPage() {
         description="과거 회차 통계로 제외수를 산정하고, 남은 번호에서 패턴 품질을 통과한 6/45 조합을 추천합니다."
       />
 
-      {/* 무료회원 주간 발급 (현장 피드백) */}
+      {/* 회원 추천조합 발급 — 등급 일괄(<추천번호> 4·5·6) + 무료 주간 자동(금 09:00) */}
       <div className="mb-4 rounded-lg border border-accent-100 bg-accent-50/60 p-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="flex items-center gap-2">
             <Gift className="h-5 w-5 text-accent-600" />
             <div>
-              <h3 className="text-[13.5px] font-bold text-ink-900">무료회원 주간 발급</h3>
+              <h3 className="text-[13.5px] font-bold text-ink-900">회원 추천조합 발급</h3>
               <p className="text-[11.5px] text-gray-500">
-                매주 금요일 09:00 자동 발급 · 문자 발송 없음 · 홈페이지(전화번호/뒷4자리)에서 조회
+                등급 선택 → 해당 등급 회원 전체 일괄 발급 · 무료회원은 매주 금 09:00 자동 ·
+                세트수는 회원별 설정(없으면 {recoCfg.set_count}) · 로직 {recoCfg.logic_ratio ?? 100}% ·
+                문자 발송 없음
               </p>
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-4 text-[12px]">
+            <select
+              value={issueGrade}
+              onChange={(e) => {
+                setIssueGrade(e.target.value as Grade)
+                setIssueMsg(null)
+              }}
+              className="h-8 rounded-md border border-gray-300 bg-white px-2 text-[12.5px] font-semibold text-gray-700 outline-none focus:border-primary-500"
+            >
+              {(['free', 'simple', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss'] as Grade[]).map((g) => (
+                <option key={g} value={g}>
+                  {GRADE_LABEL[g]}
+                </option>
+              ))}
+            </select>
             <span className="text-gray-500">
-              대상 무료회원{' '}
-              <b className="font-mono tnum text-ink-800">{num(freeStatus?.freeCount ?? 0)}</b>명
-            </span>
-            <span className="text-gray-500">
-              발급 조합{' '}
-              <b className="font-mono tnum text-ink-800">{recoCfg.set_count}</b>세트
+              대상{' '}
+              <b className="font-mono tnum text-ink-800">{num(recoStatus?.targetCount ?? 0)}</b>명
             </span>
             <span className="text-gray-500">
               최근 발급{' '}
-              {freeStatus?.lastRound ? (
+              {recoStatus?.lastRound ? (
                 <b className="font-mono tnum text-ink-800">
-                  {freeStatus.lastRound}회 · {freeStatus.lastIssuedAt ? datetime(freeStatus.lastIssuedAt) : '-'}
+                  {recoStatus.lastRound}회 · {recoStatus.lastIssuedAt ? datetime(recoStatus.lastIssuedAt) : '-'}
                 </b>
               ) : (
                 <b className="text-gray-400">없음</b>
@@ -150,7 +164,7 @@ export function RecommendPage() {
                 variant="acc"
                 size="sm"
                 icon={<Gift className="h-4 w-4" />}
-                disabled={issueWeekly.isPending}
+                disabled={issueReco.isPending}
                 onClick={() => setConfirmIssue(true)}
               >
                 지금 발급
@@ -166,20 +180,23 @@ export function RecommendPage() {
         onClose={() => setConfirmIssue(false)}
         onConfirm={() => {
           setIssueMsg(null)
-          issueWeekly.mutate(undefined, {
-            onSuccess: (r) => {
-              setConfirmIssue(false)
-              setIssueMsg(
-                `${r.round_no}회 · ${r.issued.toLocaleString('ko-KR')}명 발급 완료${r.skipped ? ` (이미 발급 ${r.skipped}명 제외)` : ''}.`,
-              )
+          issueReco.mutate(
+            { grade: issueGrade },
+            {
+              onSuccess: (r) => {
+                setConfirmIssue(false)
+                setIssueMsg(
+                  `${GRADE_LABEL[issueGrade]} ${r.round_no}회 · ${r.issued.toLocaleString('ko-KR')}명 발급 완료${r.skipped ? ` (이미 발급 ${r.skipped}명 제외)` : ''}.`,
+                )
+              },
             },
-          })
+          )
         }}
-        title="무료회원 주간 발급"
-        description={`무료회원 전원에게 ${recoCfg.set_count}조합을 발급합니다(문자 발송 없음). 이미 이번 회차를 받은 회원은 자동으로 건너뜁니다.`}
+        title={`${GRADE_LABEL[issueGrade]} 회원 일괄 발급`}
+        description={`${GRADE_LABEL[issueGrade]} 등급 회원 전원에게 추천조합을 발급합니다(문자 발송 없음). 세트수는 회원별 설정(없으면 ${recoCfg.set_count}), 로직 적용 비율 ${recoCfg.logic_ratio ?? 100}%가 적용됩니다. 이미 이번 회차를 받은 회원은 자동으로 건너뜁니다.`}
         confirmText="발급"
         tone="primary"
-        loading={issueWeekly.isPending}
+        loading={issueReco.isPending}
       />
 
       {/* 정직성 안내 */}

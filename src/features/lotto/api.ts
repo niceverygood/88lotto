@@ -2,17 +2,21 @@
 // 회차/베팅은 전역 데이터(역할 스코프 없음). '당첨 확정'은 회차 베팅의 등수/당첨금을 산정하고
 // 1~3등 당첨자의 win_history 를 갱신(§8 당첨자 세그먼트) → lotto/bets/members 쿼리 무효화.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Bet, LogEntry, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
+import type { Bet, Grade, LogEntry, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
 import { fetchSiteSettings, fetchTables } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
 import { betKeys, lottoKeys, memberKeys, settingsKeys } from '@/lib/queryKeys'
 import { gradeRank, lottoSum, oddEven, prizeForRank, resolveExcludeForGrade } from '@/lib/lotto'
-import { generateRecommendation } from '@/lib/lottoGenerator'
+import { generateIssueSets } from '@/lib/lottoGenerator'
 import * as supa from './supa'
 
-export const WEEKLY_FREE_RECO_DEFAULT = { enabled: true, set_count: 30 }
+export const WEEKLY_FREE_RECO_DEFAULT: import('@/types/db').WeeklyFreeRecoSettings = {
+  enabled: true,
+  set_count: 30,
+  logic_ratio: 100,
+}
 const WEEKLY_RECO_KEEP = 8 // 회원당 보관할 최근 발급 회차 수
 // 회원별 결정적 시드(같은 회원·회차는 동일 결과, 회원마다 다른 조합).
 function memberSeed(id: string, round: number): number {
@@ -194,17 +198,18 @@ export function useRegisterRound() {
   })
 }
 
-// ── 무료회원 주간 자동발급(현장 피드백) ─────────────────────────────────────
-// 매주 금 09:00, 무료회원에게 N(기본 30)조합 발급 → member.meta.weekly_recos 누적(문자발송 X).
-// 홈페이지(전화/뒷4자리)에서 조회. 자동 스케줄은 운영 환경의 예약 함수(pg_cron/Edge)가 본 로직을 호출.
+// ── 회원 추천조합 발급(현장 피드백) ────────────────────────────────────────
+// 주간 자동(크론, 무료 기본) 외에 콘솔에서 '등급 선택 → 일괄 발급' 지원(<추천번호> 4).
+// 세트 수 = 회원별 weekly_reco_count(없으면 전역 set_count) (<추천번호> 5).
+// 로직:랜덤 비율 = weekly_free_reco.logic_ratio % (<추천번호> 6). 문자발송 X.
 
-/** 발급 대상(무료회원) 수 + 최근 발급 회차 요약 — RecommendPage 발급 카드용. */
-export function useWeeklyFreeRecoStatus() {
+/** 발급 대상(선택 등급) 수 + 최근 발급 회차 요약 — RecommendPage 발급 카드용. */
+export function useWeeklyRecoStatus(grade: Grade) {
   return useQuery({
-    queryKey: ['weekly-free-reco-status'],
-    queryFn: async (): Promise<{ freeCount: number; lastRound: number | null; lastIssuedAt: string | null }> => {
-      if (dataSource === 'supabase') return supa.fetchWeeklyFreeRecoStatus()
-      const members = readDb().members.filter((m) => m.grade === 'free')
+    queryKey: ['weekly-reco-status', grade],
+    queryFn: async (): Promise<{ targetCount: number; lastRound: number | null; lastIssuedAt: string | null }> => {
+      if (dataSource === 'supabase') return supa.fetchWeeklyRecoStatus(grade)
+      const members = readDb().members.filter((m) => m.grade === grade && !m.is_deleted && !m.is_withdrawn)
       let lastRound: number | null = null
       let lastIssuedAt: string | null = null
       for (const m of members) {
@@ -215,7 +220,7 @@ export function useWeeklyFreeRecoStatus() {
           lastRound = top.round_no
         }
       }
-      return { freeCount: members.length, lastRound, lastIssuedAt }
+      return { targetCount: members.length, lastRound, lastIssuedAt }
     },
   })
 }
@@ -227,27 +232,28 @@ export interface WeeklyIssueResult {
 }
 
 /**
- * 무료회원 주간 발급 실행(수동 트리거 = 운영 스케줄러와 동일 로직). 멱등:
+ * 등급 일괄 발급 실행(수동 트리거 — 주간 크론과 동일 로직). 멱등:
  * 회원이 이미 대상 회차를 받았으면 건너뛴다. 문자 발송은 하지 않는다(요구사항).
  */
-export function useIssueWeeklyFreeReco() {
+export function useIssueGradeReco() {
   const user = useCurrentUser()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (): Promise<WeeklyIssueResult> => {
-      if (dataSource === 'supabase') return supa.issueWeeklyFreeReco(user?.id ?? null)
+    mutationFn: async (v: { grade: Grade }): Promise<WeeklyIssueResult> => {
+      if (dataSource === 'supabase') return supa.issueGradeReco(v.grade, user?.id ?? null)
       const cur = readDb()
       const cfg = cur.site_settings.weekly_free_reco ?? WEEKLY_FREE_RECO_DEFAULT
       const setCount = Math.max(1, cfg.set_count || WEEKLY_FREE_RECO_DEFAULT.set_count)
+      const ratio = cfg.logic_ratio ?? 100
       const rounds = cur.lotto_rounds
-      const exclude = resolveExcludeForGrade(cur.site_settings, 'free')
+      const exclude = resolveExcludeForGrade(cur.site_settings, v.grade)
       const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
       let issued = 0
       let skipped = 0
       const ts = nowIso()
       mutateDb((db) => {
         for (const m of db.members) {
-          if (m.grade !== 'free') continue
+          if (m.grade !== v.grade || m.is_deleted || m.is_withdrawn) continue
           const recos = Array.isArray(m.meta?.weekly_recos) ? (m.meta!.weekly_recos as WeeklyRecoIssue[]) : []
           if (recos[0]?.round_no === targetRound) {
             skipped++
@@ -257,12 +263,8 @@ export function useIssueWeeklyFreeReco() {
           const mCount = typeof m.meta?.weekly_reco_count === 'number' && m.meta.weekly_reco_count > 0
             ? (m.meta.weekly_reco_count as number)
             : setCount
-          const res = generateRecommendation(rounds, exclude, {
-            mode: 20,
-            setCount: mCount,
-            seed: memberSeed(m.id, targetRound),
-          })
-          const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }
+          const sets = generateIssueSets(rounds, exclude, mCount, ratio, memberSeed(m.id, targetRound))
+          const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets }
           m.meta = { ...m.meta, weekly_recos: [issue, ...recos].slice(0, WEEKLY_RECO_KEEP) }
           issued++
         }
@@ -273,7 +275,7 @@ export function useIssueWeeklyFreeReco() {
           action: 'reco.weekly_issue',
           target_type: 'member',
           target_id: null,
-          meta: { count: issued, skipped, round_no: targetRound, set_count: setCount, channel: 'weekly_free' },
+          meta: { count: issued, skipped, round_no: targetRound, set_count: setCount, logic_ratio: ratio, grade: v.grade, channel: 'console' },
           created_at: ts,
         })
       })
@@ -281,7 +283,7 @@ export function useIssueWeeklyFreeReco() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: memberKeys.all })
-      qc.invalidateQueries({ queryKey: ['weekly-free-reco-status'] })
+      qc.invalidateQueries({ queryKey: ['weekly-reco-status'] })
     },
   })
 }

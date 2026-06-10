@@ -35,7 +35,7 @@ interface WeeklyRecoIssue {
 interface SiteSettingsLite {
   lotto_exclude: LottoExcludeSettings
   lotto_exclude_history?: LottoExcludeRule[]
-  weekly_free_reco?: { enabled: boolean; set_count: number }
+  weekly_free_reco?: { enabled: boolean; set_count: number; logic_ratio?: number }
 }
 
 const LOTTO_MIN = 1
@@ -514,6 +514,7 @@ export default async function handler(req: any, res: any) {
     if (se) throw se
     const settings = sData as SiteSettingsLite
     const cfg = settings.weekly_free_reco ?? { enabled: true, set_count: DEFAULT_COUNT }
+    const ratio = Math.max(0, Math.min(100, cfg.logic_ratio ?? 100)) // 로직:랜덤 비율(현장 피드백)
     if (!cfg.enabled && !force) return res.status(200).json({ ok: true, skipped: 'disabled' })
 
     const { data: rData, error: re } = await sb.from('lotto_rounds').select('*')
@@ -551,8 +552,27 @@ export default async function handler(req: any, res: any) {
         typeof meta.weekly_reco_count === 'number' && (meta.weekly_reco_count as number) > 0
           ? (meta.weekly_reco_count as number)
           : baseCount
-      const gen = generateRecommendation(rounds, exclude, { mode: 20, setCount: count })
-      const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: gen.sets }
+      // 로직 round(count×ratio%) + 완전랜덤 나머지(소스: src/lib/lottoGenerator.generateIssueSets)
+      const logicCount = Math.max(0, Math.min(count, Math.round((count * ratio) / 100)))
+      const sets =
+        logicCount > 0
+          ? generateRecommendation(rounds, exclude, { mode: 20, setCount: logicCount }).sets
+          : []
+      const seen = new Set(sets.map((s) => s.join('-')))
+      let guard = 0
+      while (sets.length < count && guard++ < count * 200) {
+        const pool = Array.from({ length: LOTTO_MAX - LOTTO_MIN + 1 }, (_, i) => i + LOTTO_MIN)
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1))
+          ;[pool[i], pool[j]] = [pool[j], pool[i]]
+        }
+        const set = pool.slice(0, LOTTO_PICK).sort((a, b) => a - b)
+        const k = set.join('-')
+        if (seen.has(k)) continue
+        seen.add(k)
+        sets.push(set)
+      }
+      const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets }
       const nextMeta = { ...meta, weekly_recos: [issue, ...recos].slice(0, KEEP) }
       const { error } = await sb.from('members').update({ meta: nextMeta }).eq('id', r.id)
       if (error) throw error

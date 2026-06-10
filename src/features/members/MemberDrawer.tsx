@@ -24,6 +24,7 @@ import {
   readMemos,
   useAddMemo,
   useAssignStaff,
+  useDeleteMemo,
   useManualIssueReco,
   useMember,
   useMemberAssignments,
@@ -76,6 +77,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const role = useRole()
   const updateMember = useUpdateMember()
   const addMemo = useAddMemo()
+  const deleteMemo = useDeleteMemo()
   const assignStaff = useAssignStaff()
   const resetAssign = useResetAssign()
   const sendSms = useSendSms()
@@ -142,12 +144,15 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   }
   const id = member.id
 
+  // 배정이력은 최고관리자만(현장 피드백 <회원정보창> 6). 메모 카운트=삭제분 제외.
   const tabs: TabItem[] = [
     { key: 'info', label: '기본정보' },
     { key: 'payments', label: '결제내역', count: payments.length },
     { key: 'sms', label: '문자내역', count: sms.length },
-    { key: 'assignments', label: '배정이력', count: assignments.length },
-    { key: 'memo', label: '메모', count: readMemos(member).length || undefined },
+    ...(role === 'admin'
+      ? [{ key: 'assignments', label: '배정이력', count: assignments.length } as TabItem]
+      : []),
+    { key: 'memo', label: '메모', count: readMemos(member).filter((x) => !x.deleted_at).length || undefined },
     { key: 'reco', label: '발급번호', count: readWeeklyRecos(member.meta).length || undefined },
   ]
 
@@ -504,7 +509,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
         </div>
       )}
 
-      {tab === 'assignments' && (
+      {tab === 'assignments' && role === 'admin' && (
         <TabList
           rows={assignments}
           empty="배정 이력이 없습니다."
@@ -554,9 +559,10 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             </Button>
           </div>
 
-          {/* 누적 콜메모(최신순) */}
+          {/* 누적 콜메모(최신순) — 삭제는 최고관리자만, 삭제분도 최고관리자만 표시(<회원정보창> 7) */}
           {(() => {
-            const memos = readMemos(member)
+            const all = readMemos(member)
+            const memos = role === 'admin' ? all : all.filter((m) => !m.deleted_at)
             if (memos.length === 0) {
               return (
                 <div className="mt-4 py-8 text-center text-[12.5px] text-gray-400">
@@ -570,13 +576,42 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                   .slice()
                   .reverse()
                   .map((m) => (
-                    <li key={m.id} className="rounded-md border border-gray-200 bg-white p-2.5">
-                      <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-800">
-                        {m.body}
-                      </p>
+                    <li
+                      key={m.id}
+                      className={
+                        'rounded-md border p-2.5 ' +
+                        (m.deleted_at ? 'border-gray-100 bg-gray-50' : 'border-gray-200 bg-white')
+                      }
+                    >
+                      <div className="flex items-start gap-2">
+                        <p
+                          className={
+                            'min-w-0 flex-1 whitespace-pre-wrap text-[12.5px] leading-relaxed ' +
+                            (m.deleted_at ? 'text-gray-400 line-through' : 'text-ink-800')
+                          }
+                        >
+                          {m.body}
+                        </p>
+                        {role === 'admin' && !m.deleted_at && (
+                          <button
+                            type="button"
+                            title="메모 삭제(소프트) — 최고관리자만 열람 가능해집니다"
+                            disabled={deleteMemo.isPending}
+                            onClick={() => deleteMemo.mutate({ id, memoId: m.id })}
+                            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger-bg"
+                          >
+                            삭제
+                          </button>
+                        )}
+                      </div>
                       <div className="mt-1 flex items-center gap-1.5 text-[10.5px] text-gray-400">
                         <span className="font-mono tnum">{datetime(m.created_at)}</span>
                         {m.author && <span>· {staffName[m.author] ?? m.author}</span>}
+                        {m.deleted_at && (
+                          <span className="rounded bg-gray-200 px-1 font-semibold text-gray-500">
+                            삭제됨 · {datetime(m.deleted_at)}
+                          </span>
+                        )}
                       </div>
                     </li>
                   ))}

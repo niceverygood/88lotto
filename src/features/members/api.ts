@@ -11,7 +11,7 @@ import { memberKeys, paymentKeys, revenueKeys, smsTemplateKeys } from '@/lib/que
 import { renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
 import { resolveExcludeForGrade } from '@/lib/lotto'
-import { generateRecommendation } from '@/lib/lottoGenerator'
+import { generateIssueSets } from '@/lib/lottoGenerator'
 import { filterMembers, getView, MEMBER_VIEWS, type MemberFilter } from './views'
 import * as supa from './supa'
 
@@ -105,11 +105,14 @@ export interface MemberPatch {
 }
 
 // ── 콜메모(리스트형) — 현장 피드백: 메모 1건만이 아니라 순차적으로 누적 ──────
+// 삭제는 소프트(deleted_at) — 최고관리자만 삭제 가능하며 삭제분도 최고관리자만 열람(<회원정보창> 7).
 export interface MemoEntry {
   id: string
   body: string
   author: string | null // 작성 staff id
   created_at: string
+  deleted_at?: string | null
+  deleted_by?: string | null
 }
 
 /** member.meta.memos 를 안전하게 읽는다(없으면 빈 배열). */
@@ -510,6 +513,35 @@ export function useRequestPayment() {
       qc.invalidateQueries({ queryKey: memberKeys.payments(memberId) })
       qc.invalidateQueries({ queryKey: memberKeys.detail(memberId) })
     },
+  })
+}
+
+/**
+ * 콜메모 소프트삭제(<회원정보창> 7) — 최고관리자 전용(UI 가드). deleted_at 마킹만 하고 보존,
+ * member.memo(최신 1건)는 남은(미삭제) 최신 메모로 동기화한다.
+ */
+export function useDeleteMemo() {
+  const user = useCurrentUser()
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; memoId: string }) => {
+      if (dataSource === 'supabase') {
+        await supa.deleteMemo(v.id, v.memoId, user?.id ?? null)
+        return v.id
+      }
+      mutateDb((db) => {
+        const m = db.members.find((x) => x.id === v.id)
+        if (!m) return
+        const list = (Array.isArray(m.meta?.memos) ? (m.meta!.memos as MemoEntry[]) : []).map((e) =>
+          e.id === v.memoId ? { ...e, deleted_at: nowIso(), deleted_by: user?.id ?? null } : e,
+        )
+        m.meta = { ...m.meta, memos: list }
+        m.memo = [...list].reverse().find((e) => !e.deleted_at)?.body ?? null
+        db.logs.push(adminLog(user?.id ?? null, 'member.memo_delete', v.id, { memo_id: v.memoId }))
+      })
+      return v.id
+    },
+    onSuccess: (id) => invalidate([id]),
   })
 }
 
@@ -1012,7 +1044,9 @@ export function useManualIssueReco() {
       const exclude = resolveExcludeForGrade(cur.site_settings, member.grade)
       const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
       const setCount = Math.max(1, v.setCount)
-      const res = generateRecommendation(rounds, exclude, { mode: 20, setCount })
+      const ratio = cur.site_settings.weekly_free_reco?.logic_ratio ?? 100
+      const sets = generateIssueSets(rounds, exclude, setCount, ratio)
+      const res = { sets }
       const ts = nowIso()
       const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }
 
