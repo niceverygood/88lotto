@@ -5,6 +5,7 @@ import { UserPlus, Wand2, MessageSquare, RefreshCw, Tag, Eraser } from 'lucide-r
 import { BulkButton, ConfirmModal, Modal, Button } from '@/design-system/components'
 import { STATUS_META } from '@/design-system/labels'
 import { useStaff } from '@/lib/staff'
+import { useRole } from '@/lib/auth'
 import type { MemberStatus } from '@/types/db'
 import {
   useAssignStaff,
@@ -32,6 +33,8 @@ export function MemberBulkActions({
   selectedRows: unknown[]
   clear: () => void
 }) {
+  // 디비 배분/입력·담당자 변경·유입분류는 최고관리자만(현장 피드백)
+  const isAdmin = useRole() === 'admin'
   const [modal, setModal] = useState<BulkModal>(null)
   const [statusVal, setStatusVal] = useState<MemberStatus>('active')
   const [inflowVal, setInflowVal] = useState<string>(INFLOW_TYPES[0])
@@ -87,21 +90,25 @@ export function MemberBulkActions({
       <BulkButton onClick={() => setModal('status')}>
         <Tag className="h-3.5 w-3.5" /> 상태변경
       </BulkButton>
-      <BulkButton onClick={() => setModal('inflow')}>
-        <Tag className="h-3.5 w-3.5" /> 유입분류
-      </BulkButton>
-      <BulkButton onClick={openAssign}>
-        <UserPlus className="h-3.5 w-3.5" /> 담당배정
-      </BulkButton>
-      <BulkButton onClick={openAuto}>
-        <Wand2 className="h-3.5 w-3.5" /> 자동할당
-      </BulkButton>
-      <BulkButton onClick={() => setModal('reset')}>
-        <RefreshCw className="h-3.5 w-3.5" /> 담당리셋
-      </BulkButton>
-      <BulkButton onClick={() => setModal('resetdb')}>
-        <Eraser className="h-3.5 w-3.5" /> DB초기화
-      </BulkButton>
+      {isAdmin && (
+        <>
+          <BulkButton onClick={() => setModal('inflow')}>
+            <Tag className="h-3.5 w-3.5" /> 유입분류
+          </BulkButton>
+          <BulkButton onClick={openAssign}>
+            <UserPlus className="h-3.5 w-3.5" /> 담당배정
+          </BulkButton>
+          <BulkButton onClick={openAuto}>
+            <Wand2 className="h-3.5 w-3.5" /> 자동할당
+          </BulkButton>
+          <BulkButton onClick={() => setModal('reset')}>
+            <RefreshCw className="h-3.5 w-3.5" /> 담당리셋
+          </BulkButton>
+          <BulkButton onClick={() => setModal('resetdb')}>
+            <Eraser className="h-3.5 w-3.5" /> DB초기화
+          </BulkButton>
+        </>
+      )}
       <BulkButton onClick={openSms}>
         <MessageSquare className="h-3.5 w-3.5" /> 문자발송
       </BulkButton>

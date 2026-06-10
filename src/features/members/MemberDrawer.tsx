@@ -139,24 +139,31 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             ))}
           </select>
         </label>
+        {/* 담당자 변경은 최고관리자만(현장 피드백). 그 외 역할은 읽기 전용 표시. */}
         <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-500">
           담당
-          <select
-            className={selectCls}
-            value={member.assigned_staff_id ?? ''}
-            onChange={(e) =>
-              e.target.value
-                ? assignStaff.mutate({ ids: [id], staffId: e.target.value })
-                : resetAssign.mutate({ ids: [id] })
-            }
-          >
-            <option value="">미지정</option>
-            {staff.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          {role === 'admin' ? (
+            <select
+              className={selectCls}
+              value={member.assigned_staff_id ?? ''}
+              onChange={(e) =>
+                e.target.value
+                  ? assignStaff.mutate({ ids: [id], staffId: e.target.value })
+                  : resetAssign.mutate({ ids: [id] })
+              }
+            >
+              <option value="">미지정</option>
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-[12.5px] font-normal text-ink-800">
+              {member.assigned_staff_id ? (staffName[member.assigned_staff_id] ?? '-') : '미지정'}
+            </span>
+          )}
         </label>
         <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-500">
           상담상태
@@ -214,10 +221,15 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
           <Row label="성향">{member.tendency ?? '-'}</Row>
           <Row label="상담상태">{member.consult_status ?? '-'}</Row>
           <Row label="아웃콜">{member.outcall_done ? '완료' : '미처리'}</Row>
-          <Row label="유입코드" mono>
-            {member.inflow_code ?? '-'}
-          </Row>
-          <Row label="유입구분">{member.inflow_type ?? '-'}</Row>
+          {/* 유입코드/유입구분은 최고관리자만(현장 피드백) */}
+          {role === 'admin' && (
+            <>
+              <Row label="유입코드" mono>
+                {member.inflow_code ?? '-'}
+              </Row>
+              <Row label="유입구분">{member.inflow_type ?? '-'}</Row>
+            </>
+          )}
           <Row label="담당자">{member.assigned_staff_id ? staffName[member.assigned_staff_id] ?? '-' : '미지정'}</Row>
           <Row label="팀">{member.team_id ? teamName[member.team_id] ?? '-' : '-'}</Row>
           <Row label="가입일시" mono>

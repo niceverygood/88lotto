@@ -16,11 +16,12 @@ import * as supa from './supa'
 export { memberKeys }
 
 // ── RLS 에뮬레이션: 역할별 데이터 스코프 (mock). 실 전환 시 RLS 가 대신. ──
+// 명칭변경/권한(현장 피드백): 최고관리자(admin)·관리자(manager)·실장(leader)=전체 이용자,
+// 팀장(rep)=본인 담당만. (실장이 팀 한정 → 전체로 확대)
 function scopeMembers(all: readonly Member[], user: CurrentUser | null): Member[] {
   if (!user) return []
-  if (user.role === 'admin' || user.role === 'manager') return [...all]
-  if (user.role === 'leader') return all.filter((m) => m.team_id === user.teamId)
-  return all.filter((m) => m.assigned_staff_id === user.id) // rep = 본인 담당
+  if (user.role === 'rep') return all.filter((m) => m.assigned_staff_id === user.id) // 팀장 = 본인 담당
+  return [...all] // 최고관리자·관리자·실장 = 전체
 }
 
 // ── 정렬 ──────────────────────────────────────────────────────────────
