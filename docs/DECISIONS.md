@@ -337,3 +337,10 @@
 - **이유**: 6/14 데드라인 — 별도 프론트/인프라 없이 기존 Vercel 프로젝트 안에서 포털·크론 모두 충족. RPC 방식이라 향후 독립 홈페이지(별도 도메인)로 분리해도 동일 API 재사용.
 - **영향**: 라이브 RPC 검증(정상 로그인 true/오답 거부/미등록 거부). mock E2E — /portal 로그인(변경비번 8888 통과·기본값 거부) → '1181회 추천번호 5조합' 표시, 콘솔 에러 0. `tsc`·`vite build` 통과. **TODO(live-verify)**: ① 배포 후 `force=1` 실발급 1회 검증 ② 포털 rate-limit(현재 없음 — 무차별 대입은 RPC 자격검증만, 필요시 edge rate limit) ③ Vercel Hobby 크론은 일 1회·정시 ±1h 허용 오차 ④ 전화번호 중복 회원은 최신 가입 1명 기준.
 - **✅ 라이브 검증 완료(2026-06-10)**: Vercel 프로덕션 배포 후 — `/portal` 200 · 크론 무인증 401 · 시크릿+요일게이트(수요일 207명 day-skip) · `force=1` 실발급 **1181회 207명** · 재실행 멱등(207 skippedRound) · 포털 RPC 로 발급분(1181회) 조회 정합. 단, **Vercel 함수는 api/ 밖 TS 모듈 해석 불가**(ESM ERR_MODULE_NOT_FOUND) → `api/weekly-reco.ts` 를 생성 로직 인라인 **자급자족 단일 파일**로 재구성(원본 src/lib/lottoGenerator 수정 시 동기화 필요 — 헤더 명시). env `SUPABASE_SERVICE_ROLE_KEY`·`CRON_SECRET`(.env.local 보관) 프로덕션 등록.
+
+### D55. 등급별 권한 서버측 강제 — 디비 입력/배분/담당변경 admin-only 트리거 + 실장 종속데이터 정합 (D51 후속 마감)
+- **결정**: 차장 피드백(회원정보창·권한) 재점검에서 발견된 라이브 구멍 2건을 `supabase/migrations/0003_admin_only_db_ops.sql` 로 마감.
+  1. **실장(leader) 종속 데이터 불일치**: D51 마이그레이션이 members 정책만 leader=전체로 풀고 `app_can_see_member`(결제·문자·배정이 종속)는 팀 스코프로 남음 → 실장이 회원 329명 전체를 보면서 결제는 41/67건만 보임. 함수의 leader 분기를 전체로 갱신(피드백 "실장은 모든 이용자의 정보").
+  2. **디비 입력/배분/담당변경 admin-only 가 UI 가드뿐**: 라이브 행동테스트(무변경 PATCH) 결과 **관리자·실장·팀장 전원이 REST 직접 호출로 `assigned_staff_id` 변경 가능**(members_rw 가 쓰기 허용). RLS 는 컬럼 단위 차단 불가 → **BEFORE 트리거 `members_admin_ops`**: INSERT(디비 입력)=admin 외 거부, UPDATE 는 `assigned_staff_id`/`team_id` 변경시에만 admin 검사(상태·메모·문자·회원설정 등 일반 갱신 무영향). `auth.uid() is null`(service_role 크론·시드·SQL Editor)은 면제. assignments 는 select=가시회원/insert=admin/update·delete=거부(이력 불변)로 분리.
+- **이유**: "담당자 변경·디비 배분·입력은 최고관리자만"은 보안 요구라 클라 가드만으론 미충족(API 우회 가능). 트리거는 어떤 정책/경로로 들어와도 강제됨.
+- **영향**: 검증 — 적용 전 무변경 PATCH 가 4역할 모두 허용(1) → 적용 후 admin 만 허용·그 외 거부 + 실장 payments 41→67 확인 예정(적용 후 본 항목 갱신). 관리자(manager)도 차단·유입 숨김 대상(피드백 문구 "최고관리자만" 직역 — 관리자 포함 여부는 차장 확인 시 트리거 1줄 조정). mock 경로는 UI 가드 유지(데모 전용). 앱 코드 무변경(SQL 만).
