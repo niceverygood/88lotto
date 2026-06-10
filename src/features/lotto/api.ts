@@ -264,9 +264,13 @@ export function useIssueWeeklyFreeReco() {
             skipped++
             continue
           }
+          // 회원별 발송갯수 override(현장 피드백). 미설정 시 전역 set_count.
+          const mCount = typeof m.meta?.weekly_reco_count === 'number' && m.meta.weekly_reco_count > 0
+            ? (m.meta.weekly_reco_count as number)
+            : setCount
           const res = generateRecommendation(rounds, exclude, {
             mode: 20,
-            setCount,
+            setCount: mCount,
             seed: memberSeed(m.id, targetRound),
           })
           const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }

@@ -47,16 +47,16 @@ function enrich(
 }
 
 // ── RLS 에뮬레이션: 회원 배정 기준으로 결제를 스코프 (members 와 동일 기준). ──
+// 명칭변경/권한(현장 피드백): 최고관리자·관리자·실장=전체, 팀장(rep)=본인 담당 회원 결제만.
 function scopePayments(
   payments: readonly Payment[],
   members: Record<string, Member>,
   user: CurrentUser | null,
 ): Payment[] {
   if (!user) return []
-  if (user.role === 'admin' || user.role === 'manager') return [...payments]
-  if (user.role === 'leader')
-    return payments.filter((p) => members[p.member_id]?.team_id === user.teamId)
-  return payments.filter((p) => members[p.member_id]?.assigned_staff_id === user.id)
+  if (user.role === 'rep')
+    return payments.filter((p) => members[p.member_id]?.assigned_staff_id === user.id)
+  return [...payments]
 }
 
 // ── 정렬 ──────────────────────────────────────────────────────────────
@@ -358,9 +358,8 @@ export function useMemberSearch(term: string) {
       const db = dataSource === 'supabase' ? await fetchTables(['members']) : readDb()
       let scoped: Member[]
       if (!user) scoped = []
-      else if (user.role === 'admin' || user.role === 'manager') scoped = [...db.members]
-      else if (user.role === 'leader') scoped = db.members.filter((m) => m.team_id === user.teamId)
-      else scoped = db.members.filter((m) => m.assigned_staff_id === user.id)
+      else if (user.role === 'rep') scoped = db.members.filter((m) => m.assigned_staff_id === user.id)
+      else scoped = [...db.members] // 최고관리자·관리자·실장 = 전체
       const s = term.trim().toLowerCase()
       const matched = s
         ? scoped.filter((m) =>
