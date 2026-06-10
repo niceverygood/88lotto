@@ -2,7 +2,7 @@
 // 액션(등급변경·담당변경·정지·아웃콜·문자발송). 모든 액션은 api 뮤테이션 →
 // 관련 쿼리 무효화 + 로그/배정/문자 부수효과를 만든다.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { CreditCard, MessageSquare, Send } from 'lucide-react'
+import { CreditCard, Dices, MessageSquare, Send } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -24,6 +24,7 @@ import {
   readMemos,
   useAddMemo,
   useAssignStaff,
+  useManualIssueReco,
   useMember,
   useMemberAssignments,
   useMemberPayments,
@@ -31,6 +32,7 @@ import {
   useProducts,
   useRequestPayment,
   useResetAssign,
+  useSendCustomSms,
   useSendSms,
   useSmsTemplates,
   useUpdateMember,
@@ -77,12 +79,17 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const assignStaff = useAssignStaff()
   const resetAssign = useResetAssign()
   const sendSms = useSendSms()
+  const sendCustomSms = useSendCustomSms()
+  const manualIssue = useManualIssueReco()
   const requestPayment = useRequestPayment()
   const updateSettings = useUpdateMemberSettings()
 
   const [tab, setTab] = useState<DrawerTab>('info')
   const [memoDraft, setMemoDraft] = useState('')
   const [smsTpl, setSmsTpl] = useState('')
+  const [smsBody, setSmsBody] = useState('') // 직접 입력 발송 본문
+  const [issueCount, setIssueCount] = useState('') // 수동 발급 세트 수
+  const [issueSms, setIssueSms] = useState(false) // 수동 발급 시 문자 발송 여부
   const [confirmSuspend, setConfirmSuspend] = useState(false)
   // 회원 설정(조합발송요일/갯수/홈페이지 비번)
   const [sendDay, setSendDay] = useState('')
@@ -102,6 +109,9 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     setHpPw(metaStr(member?.meta, 'homepage_pw'))
     setPayProduct('')
     setPayMethod('bank')
+    setSmsBody('')
+    setIssueCount('')
+    setIssueSms(false)
   }, [member?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (templates.length && !smsTpl) setSmsTpl(templates[0].key)
@@ -451,6 +461,33 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
               발송
             </Button>
           </div>
+          {/* 직접 입력 발송(현장 피드백 <회원정보창> 3) */}
+          <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+            <div className="mb-1.5 text-[11.5px] font-semibold text-gray-500">직접 입력 발송</div>
+            <textarea
+              value={smsBody}
+              onChange={(e) => setSmsBody(e.target.value)}
+              rows={3}
+              placeholder="발송할 문자 내용을 직접 입력하세요."
+              className="w-full rounded-md border border-gray-300 p-2 text-[12.5px] text-gray-700 outline-none focus:border-primary-500"
+            />
+            <div className="mt-1.5 flex items-center justify-between">
+              <span className="font-mono text-[10.5px] tnum text-gray-400">
+                {new Blob([smsBody]).size}byte {new Blob([smsBody]).size > 90 ? '· LMS' : '· SMS'}
+              </span>
+              <Button
+                size="sm"
+                variant="acc"
+                icon={<Send className="h-3.5 w-3.5" />}
+                disabled={!smsBody.trim() || sendCustomSms.isPending}
+                onClick={() =>
+                  sendCustomSms.mutate({ ids: [id], body: smsBody }, { onSuccess: () => setSmsBody('') })
+                }
+              >
+                직접 발송
+              </Button>
+            </div>
+          </div>
           <TabList
             rows={sms}
             empty="발송된 문자가 없습니다."
@@ -582,6 +619,45 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
               <b className="font-mono">{homepageId(member.phone)}</b> / 뒷4자리{' '}
               <b className="font-mono">{homepagePw(member.phone)}</b> 로 로그인해 확인합니다.
             </span>
+          </div>
+
+          {/* 수동 발급(현장 피드백 <회원정보창> 4) — 즉시 조합 생성·발급, 옵션 문자 발송 */}
+          <div className="mb-3 rounded-lg border border-primary-100 bg-primary-50 p-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-bold text-primary-700">
+              <Dices className="h-4 w-4" /> 수동 발급
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                className={selectCls + ' w-[120px]'}
+                inputMode="numeric"
+                placeholder={`세트 수(기본 ${metaNum(member.meta, 'weekly_reco_count') ?? 30})`}
+                value={issueCount}
+                onChange={(e) => setIssueCount(e.target.value.replace(/\D/g, ''))}
+              />
+              <label className="flex items-center gap-1.5 text-[12px] text-gray-600">
+                <input type="checkbox" checked={issueSms} onChange={(e) => setIssueSms(e.target.checked)} />
+                문자로도 발송
+              </label>
+              <Button
+                size="sm"
+                variant="pri"
+                className="ml-auto"
+                disabled={manualIssue.isPending}
+                onClick={() =>
+                  manualIssue.mutate({
+                    memberId: id,
+                    setCount: Number(issueCount) || metaNum(member.meta, 'weekly_reco_count') || 30,
+                    alsoSms: issueSms,
+                  })
+                }
+              >
+                지금 발급
+              </Button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-gray-500">
+              회원 등급의 고정/제외 규칙(없으면 공통)으로 즉시 생성됩니다. 발급 즉시 아래 목록·홈페이지에 반영
+              {issueSms ? ' + 문자 발송' : ''}됩니다.
+            </p>
           </div>
           {(() => {
             const issues = readWeeklyRecos(member.meta)

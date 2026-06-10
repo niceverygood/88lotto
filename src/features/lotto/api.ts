@@ -2,13 +2,13 @@
 // 회차/베팅은 전역 데이터(역할 스코프 없음). '당첨 확정'은 회차 베팅의 등수/당첨금을 산정하고
 // 1~3등 당첨자의 win_history 를 갱신(§8 당첨자 세그먼트) → lotto/bets/members 쿼리 무효화.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Bet, Grade, LogEntry, LottoExcludeRule, LottoExcludeSettings, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
+import type { Bet, LogEntry, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
 import { fetchSiteSettings, fetchTables } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
 import { betKeys, lottoKeys, memberKeys, settingsKeys } from '@/lib/queryKeys'
-import { gradeRank, lottoSum, oddEven, prizeForRank } from '@/lib/lotto'
+import { gradeRank, lottoSum, oddEven, prizeForRank, resolveExcludeForGrade } from '@/lib/lotto'
 import { generateRecommendation } from '@/lib/lottoGenerator'
 import * as supa from './supa'
 
@@ -69,27 +69,9 @@ export function useRounds(filter: RoundFilter = 'all') {
 /**
  * 추천 생성기용 수동 고정·제외 설정. settings 페이지의 useSiteSettings 와 동일 쿼리 키를
  * 공유하므로(설정 캐시 재사용) 설정 편집이 추천 화면에 즉시 반영된다(§2 feature 간 import 회피).
+ * 등급별 규칙 해석은 lib/lotto.resolveExcludeForGrade(회원 모듈 수동발급과 공유)로 이동 — 재노출.
  */
-function todayStr(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-// 등급별 활성 고정/제외 규칙 = effective_from<=오늘 중 가장 최근. 해당 등급 규칙이 없으면
-// 공통(grade=null) → 그것도 없으면 레거시 lotto_exclude 스냅샷으로 폴백(현장 피드백).
-export function resolveExcludeForGrade(
-  settings: Pick<SiteSettings, 'lotto_exclude' | 'lotto_exclude_history'>,
-  grade: Grade | null,
-): LottoExcludeSettings {
-  const today = todayStr()
-  const effective = (settings.lotto_exclude_history ?? [])
-    .filter((r) => r.effective_from <= today)
-    .sort((a, b) => b.effective_from.localeCompare(a.effective_from) || b.round_no - a.round_no)
-  const pick = (g: Grade | null): LottoExcludeRule | undefined =>
-    effective.find((r) => (r.grade ?? null) === g)
-  const rule = (grade != null ? pick(grade) : undefined) ?? pick(null)
-  return rule ? { fixed: rule.fixed, excluded: rule.excluded } : settings.lotto_exclude
-}
+export { resolveExcludeForGrade } from '@/lib/lotto'
 
 // 추천 생성용 사이트 설정(고정/제외 이력 포함). 등급 해석은 resolveExcludeForGrade 로 호출측에서 수행.
 export function useLottoExclude() {

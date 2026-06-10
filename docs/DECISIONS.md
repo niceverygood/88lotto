@@ -320,3 +320,11 @@
   - 회원 설정/비번/발송 저장은 `useUpdateMemberSettings`(meta 병합, mock+`supa.updateMemberMeta`).
 - **이유**: 담당이 본인 회원 결제를 직접 올리되 타 회원 결제는 비노출(스코프), 회원별 발송 커스터마이즈, 홈페이지 비번 운영 관리.
 - **영향**: `tsc`·`vite build` 통과. mock E2E(팀장 로그인) — 결제내역 탭 결제 요청 폼(상품 골드 1개월/무통장)→대기 결제 ₩33,000 생성, 기본정보 회원설정 카드(발송요일/갯수/비번), 비번 8888 변경 후 재오픈 시 유지 확인, 담당 셀렉트 읽기전용, 콘솔 에러 0. **TODO(live-verify)**: ① 회원별 '조합발송요일'을 실제로 그날 발송하려면 운영 스케줄러가 매일 돌며 요일 매칭 발송(현재 수동 '지금 발급'은 요일 무시 전체 발급, 요일은 저장만) ② 결제요청 권한/한도(담당이 임의 금액 변경 불가 — 상품가 고정) ③ 등급/발송설정 편집 권한 범위(현재 상세 접근 가능한 전 역할 편집 가능 — 필요시 admin 한정).
+
+### D53. 회원정보창 — 직접 입력 문자발송 + 수동 조합 발급/발송 (현장 피드백 3·4)
+- **결정**: 정의현 차장 `<회원정보창>` 3·4번(2026-06-10 카톡).
+  - **직접 입력 문자발송**: 문자내역 탭에 자유 본문 textarea + '직접 발송'. `SmsType` 에 `direct`('직접입력') 추가, `useSendCustomSms`(+`supa.sendCustomSms`) — 템플릿 없이 발송, byte/SMS·LMS 표시, 실발송 게이트(oneshot_enabled+sender_no)는 기존과 동일.
+  - **수동 조합 발급/발송**: 발급번호 탭에 '수동 발급' 패널(세트 수 입력, 기본=회원별 갯수→30, '문자로도 발송' 체크). `useManualIssueReco`(+`supa.manualIssueReco`) — **회원 등급의 고정/제외 규칙**(resolveExcludeForGrade, 없으면 공통)으로 즉시 생성 → `meta.weekly_recos` 누적(발급번호 탭·홈페이지 노출), 옵션 시 조합 본문 SMS(type=recommend) 발송. `reco.manual_issue` 로그.
+  - **구조**: `resolveExcludeForGrade` 를 features/lotto/api → **lib/lotto.ts 로 이동**(members 모듈과 공유, §2 feature 간 직접 import 금지 — lotto/api 는 재노출로 기존 import 호환).
+- **이유**: 담당이 템플릿 외 상담 문자를 즉석 발송, 유료회원 등 개별 회원에게 조합을 수동으로 발급·문자 전달(주간 자동발급과 별개 운영 플로우).
+- **영향**: `tsc`·`vite build` 통과. mock E2E(팀장 rep01) — 직접 발송 → 문자내역 '직접입력' 기록, 수동 발급 5세트 → 1181회 발급(전 세트 고정수 7=공통 규칙)+추천 SMS 기록, 콘솔 에러 0. **TODO(live-verify)**: ① 기존 `supa.sendSms`(템플릿 발송 live 경로)는 기록만 하고 실발송 미호출 — sendCustomSms/manualIssueReco 는 실발송 게이트 포함으로 구현했으니 템플릿 경로도 정합 필요 ② 수동 발급 권한 범위(현재 상세 접근 가능 전 역할) ③ 조합 LMS 길이(30세트 문자 발송 시 2,000byte 초과 가능 — 분할 발송 검토).
