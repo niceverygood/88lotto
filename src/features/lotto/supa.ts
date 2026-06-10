@@ -159,7 +159,10 @@ export async function issueWeeklyFreeReco(actor: string | null): Promise<WeeklyI
       skipped++
       continue
     }
-    const res = generateRecommendation(rounds, exclude, { mode: 20, setCount, seed: seedFor(r.id, targetRound) })
+    const mCount = typeof r.meta?.weekly_reco_count === 'number' && (r.meta.weekly_reco_count as number) > 0
+      ? (r.meta.weekly_reco_count as number)
+      : setCount
+    const res = generateRecommendation(rounds, exclude, { mode: 20, setCount: mCount, seed: seedFor(r.id, targetRound) })
     const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }
     const meta = { ...(r.meta ?? {}), weekly_recos: [issue, ...recos].slice(0, 8) }
     const { error } = await sb().from('members').update({ meta }).eq('id', r.id)

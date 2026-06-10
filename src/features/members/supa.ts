@@ -325,6 +325,50 @@ export async function addMemo(id: string, body: string, actor: string | null): P
   await pushLog({ kind: 'admin', actor, action: 'member.memo_add', target_type: 'member', target_id: id, meta: { body } })
 }
 
+/** 회원 meta 설정(조합발송요일/갯수/홈페이지 비번 등) 병합 갱신. */
+export async function updateMemberMeta(
+  id: string,
+  patch: Record<string, unknown>,
+  actor: string | null,
+): Promise<void> {
+  const { data: cur } = await sb().from('members').select('meta').eq('id', id).maybeSingle()
+  const meta = ((cur as { meta: Record<string, unknown> } | null)?.meta ?? {}) as Record<string, unknown>
+  const next = { ...meta }
+  for (const [k, val] of Object.entries(patch)) {
+    if (val === null || val === undefined || val === '') delete next[k]
+    else next[k] = val
+  }
+  const { error } = await sb().from('members').update({ meta: next }).eq('id', id)
+  if (error) throw error
+  await pushLog({ kind: 'admin', actor, action: 'member.settings_update', target_type: 'member', target_id: id, meta: { patch } })
+}
+
+/** 결제 요청 → 대기(wait) 결제 1건 생성. */
+export async function requestPayment(
+  v: { memberId: string; productId: string; amount: number; method: string; depositorName?: string | null },
+  actor: string | null,
+): Promise<void> {
+  const { data: m } = await sb().from('members').select('name, assigned_staff_id').eq('id', v.memberId).maybeSingle()
+  const member = m as { name: string; assigned_staff_id: string | null } | null
+  const { error } = await sb().from('payments').insert({
+    id: genId('pay'),
+    member_id: v.memberId,
+    product_id: v.productId,
+    amount: v.amount,
+    method: v.method,
+    pg_provider: null,
+    status: 'wait',
+    period_start: null,
+    period_end: null,
+    depositor_name: v.depositorName?.trim() || member?.name || null,
+    staff_id: member?.assigned_staff_id ?? actor,
+    paid_at: null,
+    created_at: nowIso(),
+  })
+  if (error) throw error
+  await pushLog({ kind: 'admin', actor, action: 'payment.request', target_type: 'member', target_id: v.memberId, meta: { product_id: v.productId, amount: v.amount, method: v.method } })
+}
+
 export async function bulkUpdateMembers(
   ids: string[],
   patch: MemberPatch & { inflow_type?: string },

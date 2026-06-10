@@ -2,12 +2,12 @@
 // 컴포넌트 직접 fetch 금지. 뮤테이션은 mock DB 를 변경하고 §8 흐름대로
 // 로그/배정/문자 부수효과를 만든 뒤 관련 쿼리를 무효화한다.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Grade, LogEntry, Member, MemberStatus, Role, SmsSend, Staff } from '@/types/db'
+import type { Grade, LogEntry, Member, MemberStatus, Payment, PaymentMethod, Role, SmsSend, Staff } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
 import { staffById, staffRoleById, assignableReps } from '@/lib/staff'
 import { useCurrentUser, type CurrentUser } from '@/lib/auth'
-import { memberKeys, smsTemplateKeys } from '@/lib/queryKeys'
+import { memberKeys, paymentKeys, revenueKeys, smsTemplateKeys } from '@/lib/queryKeys'
 import { renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
 import { filterMembers, getView, MEMBER_VIEWS, type MemberFilter } from './views'
@@ -418,6 +418,96 @@ export function useAddMemo() {
       return v.id
     },
     onSuccess: (id) => invalidate([id]),
+  })
+}
+
+// ── 회원정보창 추가(현장 피드백): 조합발송요일·갯수·홈페이지 비번 등 meta 설정 ──────────
+export interface MemberSettingsPatch {
+  homepage_pw?: string | null // 홈페이지 로그인 비번(미설정 시 전화 뒷4자리)
+  weekly_reco_day?: number | null // 조합발송요일 0=일..6=토 (미설정 시 전역 기본=금)
+  weekly_reco_count?: number | null // 조합발송갯수 (미설정 시 전역 기본)
+}
+
+/** 회원별 발송 설정/홈페이지 비번 등(member.meta) 갱신. */
+export function useUpdateMemberSettings() {
+  const user = useCurrentUser()
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; patch: MemberSettingsPatch }) => {
+      if (dataSource === 'supabase') {
+        await supa.updateMemberMeta(v.id, v.patch as Record<string, unknown>, user?.id ?? null)
+        return v.id
+      }
+      mutateDb((db) => {
+        const m = db.members.find((x) => x.id === v.id)
+        if (!m) return
+        const meta = { ...m.meta }
+        for (const [k, val] of Object.entries(v.patch)) {
+          if (val === null || val === undefined || val === '') delete meta[k]
+          else meta[k] = val
+        }
+        m.meta = meta
+        db.logs.push(adminLog(user?.id ?? null, 'member.settings_update', v.id, { patch: v.patch }))
+      })
+      return v.id
+    },
+    onSuccess: (id) => invalidate([id]),
+  })
+}
+
+// ── 결제 요청(현장 피드백): 담당이 본인 회원 결제를 '대기'로 올림 → 관리자 승인 ──────────
+export interface RequestPaymentInput {
+  memberId: string
+  productId: string
+  amount: number
+  method: PaymentMethod
+  depositorName?: string | null
+}
+
+/** 회원 상세에서 결제 요청 → 대기(wait) 결제 생성. 승인은 결제 모듈(최고관리자/관리자). */
+export function useRequestPayment() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: RequestPaymentInput) => {
+      if (dataSource === 'supabase') {
+        await supa.requestPayment(v, user?.id ?? null)
+        return v.memberId
+      }
+      const id = genId('pay')
+      mutateDb((db) => {
+        const member = db.members.find((m) => m.id === v.memberId)
+        const ts = nowIso()
+        const p: Payment = {
+          id,
+          member_id: v.memberId,
+          product_id: v.productId,
+          amount: v.amount,
+          method: v.method,
+          pg_provider: null,
+          status: 'wait',
+          period_start: null,
+          period_end: null,
+          depositor_name: v.depositorName?.trim() || member?.name || null,
+          staff_id: member?.assigned_staff_id ?? user?.id ?? null,
+          paid_at: null,
+          created_at: ts,
+        }
+        db.payments.push(p)
+        db.logs.push(adminLog(user?.id ?? null, 'payment.request', v.memberId, {
+          product_id: v.productId,
+          amount: v.amount,
+          method: v.method,
+        }))
+      })
+      return v.memberId
+    },
+    onSuccess: (memberId) => {
+      qc.invalidateQueries({ queryKey: paymentKeys.all })
+      qc.invalidateQueries({ queryKey: revenueKeys.all })
+      qc.invalidateQueries({ queryKey: memberKeys.payments(memberId) })
+      qc.invalidateQueries({ queryKey: memberKeys.detail(memberId) })
+    },
   })
 }
 

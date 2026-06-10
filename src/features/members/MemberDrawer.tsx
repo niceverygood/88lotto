@@ -2,7 +2,7 @@
 // 액션(등급변경·담당변경·정지·아웃콜·문자발송). 모든 액션은 api 뮤테이션 →
 // 관련 쿼리 무효화 + 로그/배정/문자 부수효과를 만든다.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { MessageSquare, Send } from 'lucide-react'
+import { CreditCard, MessageSquare, Send } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -29,12 +29,15 @@ import {
   useMemberPayments,
   useMemberSms,
   useProducts,
+  useRequestPayment,
   useResetAssign,
   useSendSms,
   useSmsTemplates,
   useUpdateMember,
+  useUpdateMemberSettings,
   type ResetMemo,
 } from './api'
+import type { PaymentMethod } from '@/types/db'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
 type DrawerTab = 'info' | 'payments' | 'sms' | 'assignments' | 'memo' | 'reco'
@@ -46,6 +49,16 @@ function readWeeklyRecos(meta: Record<string, unknown> | undefined): WeeklyRecoI
 
 const selectCls =
   'h-8 rounded-md border border-gray-300 bg-white px-2 text-[12px] text-gray-700 outline-none focus:border-primary-500'
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
+const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: 'bank', label: '무통장' },
+  { value: 'manual', label: '수기' },
+  { value: 'pg', label: 'PG' },
+]
+const metaNum = (meta: Record<string, unknown> | undefined, key: string): number | null =>
+  typeof meta?.[key] === 'number' ? (meta[key] as number) : null
+const metaStr = (meta: Record<string, unknown> | undefined, key: string): string =>
+  typeof meta?.[key] === 'string' ? (meta[key] as string) : ''
 
 export function MemberDrawer({ memberId, onClose }: { memberId: string | null; onClose: () => void }) {
   const open = !!memberId
@@ -64,15 +77,31 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const assignStaff = useAssignStaff()
   const resetAssign = useResetAssign()
   const sendSms = useSendSms()
+  const requestPayment = useRequestPayment()
+  const updateSettings = useUpdateMemberSettings()
 
   const [tab, setTab] = useState<DrawerTab>('info')
   const [memoDraft, setMemoDraft] = useState('')
   const [smsTpl, setSmsTpl] = useState('')
   const [confirmSuspend, setConfirmSuspend] = useState(false)
+  // 회원 설정(조합발송요일/갯수/홈페이지 비번)
+  const [sendDay, setSendDay] = useState('')
+  const [sendCount, setSendCount] = useState('')
+  const [hpPw, setHpPw] = useState('')
+  // 결제 요청
+  const [payProduct, setPayProduct] = useState('')
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('bank')
 
   useEffect(() => {
     setMemoDraft('') // 새 콜메모 입력칸(리스트형 누적) — 회원 전환 시 비움
     setTab('info')
+    const d = metaNum(member?.meta, 'weekly_reco_day')
+    const c = metaNum(member?.meta, 'weekly_reco_count')
+    setSendDay(d === null ? '' : String(d))
+    setSendCount(c === null ? '' : String(c))
+    setHpPw(metaStr(member?.meta, 'homepage_pw'))
+    setPayProduct('')
+    setPayMethod('bank')
   }, [member?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (templates.length && !smsTpl) setSmsTpl(templates[0].key)
@@ -242,17 +271,141 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
           <Row label="홈페이지 ID" mono>
             {homepageId(member.phone) || '-'}
           </Row>
-          <Row label="홈페이지 PW(기본)" mono>
-            {homepagePw(member.phone) || '-'}
+          <Row label="홈페이지 PW" mono>
+            {metaStr(member.meta, 'homepage_pw') || homepagePw(member.phone) || '-'}
+            {!metaStr(member.meta, 'homepage_pw') && <span className="ml-1 text-[10px] text-gray-400">(기본)</span>}
           </Row>
         </dl>
       )}
 
+      {tab === 'info' && (
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <div className="mb-2.5 text-[12px] font-bold text-gray-600">회원 설정 · 발송 / 홈페이지</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold text-gray-500">조합발송요일</span>
+              <select className={selectCls + ' w-full'} value={sendDay} onChange={(e) => setSendDay(e.target.value)}>
+                <option value="">전역 기본(금)</option>
+                {WEEKDAYS.map((d, i) => (
+                  <option key={i} value={i}>
+                    {d}요일
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold text-gray-500">조합발송갯수</span>
+              <input
+                className={selectCls + ' w-full'}
+                inputMode="numeric"
+                placeholder="전역 기본(30)"
+                value={sendCount}
+                onChange={(e) => setSendCount(e.target.value.replace(/\D/g, ''))}
+              />
+            </label>
+            <div className="col-span-2 flex items-end justify-end">
+              <Button
+                size="sm"
+                variant="pri"
+                disabled={updateSettings.isPending}
+                onClick={() =>
+                  updateSettings.mutate({
+                    id,
+                    patch: {
+                      weekly_reco_day: sendDay === '' ? null : Number(sendDay),
+                      weekly_reco_count: sendCount === '' ? null : Number(sendCount),
+                    },
+                  })
+                }
+              >
+                발송설정 저장
+              </Button>
+            </div>
+            <label className="col-span-2 block">
+              <span className="mb-1 block text-[11px] font-semibold text-gray-500">
+                홈페이지 비밀번호 변경 <span className="font-normal text-gray-400">(비우면 기본=전화 뒷4자리)</span>
+              </span>
+              <div className="flex gap-2">
+                <input
+                  className={selectCls + ' flex-1'}
+                  value={hpPw}
+                  placeholder={homepagePw(member.phone)}
+                  onChange={(e) => setHpPw(e.target.value)}
+                />
+                <Button
+                  size="sm"
+                  variant="sec"
+                  disabled={updateSettings.isPending}
+                  onClick={() => updateSettings.mutate({ id, patch: { homepage_pw: hpPw.trim() || null } })}
+                >
+                  변경
+                </Button>
+              </div>
+            </label>
+          </div>
+        </div>
+      )}
+
       {tab === 'payments' && (
-        <TabList
-          rows={payments}
-          empty="결제 내역이 없습니다."
-          render={(p) => (
+        <div>
+          {/* 결제 요청(현장 피드백) — 상품 선택 → 대기 결제 생성, 관리자 승인 */}
+          {(() => {
+            const activeProducts = products.filter((p) => p.is_active)
+            const selected = activeProducts.find((p) => p.id === payProduct)
+            return (
+              <div className="mb-3 rounded-lg border border-primary-100 bg-primary-50 p-2.5">
+                <div className="mb-2 flex items-center gap-2 text-[12px] font-bold text-primary-700">
+                  <CreditCard className="h-4 w-4" /> 결제 요청
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <select
+                    className={selectCls + ' flex-1'}
+                    value={payProduct}
+                    onChange={(e) => setPayProduct(e.target.value)}
+                  >
+                    <option value="">상품 선택</option>
+                    {activeProducts.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {krw(p.price)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className={selectCls}
+                    value={payMethod}
+                    onChange={(e) => setPayMethod(e.target.value as PaymentMethod)}
+                  >
+                    {PAYMENT_METHODS.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="pri"
+                    disabled={!selected || requestPayment.isPending}
+                    onClick={() =>
+                      selected &&
+                      requestPayment.mutate(
+                        { memberId: id, productId: selected.id, amount: selected.price, method: payMethod },
+                        { onSuccess: () => setPayProduct('') },
+                      )
+                    }
+                  >
+                    결제 요청
+                  </Button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-gray-500">
+                  요청 시 ‘대기’ 결제가 생성되고, 최고관리자/관리자가 결제 모듈에서 승인합니다.
+                </p>
+              </div>
+            )
+          })()}
+          <TabList
+            rows={payments}
+            empty="결제 내역이 없습니다."
+            render={(p) => (
             <div key={p.id} className="flex items-center justify-between border-b border-gray-100 py-2.5">
               <div className="flex items-center gap-2">
                 <StatusChip status={p.status} />
@@ -271,8 +424,9 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                 </div>
               </div>
             </div>
-          )}
-        />
+            )}
+          />
+        </div>
       )}
 
       {tab === 'sms' && (
