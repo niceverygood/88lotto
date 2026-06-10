@@ -429,3 +429,50 @@ export const EXCLUSION_RULE_LABEL: Record<ExclusionRuleKey, string> = {
 }
 
 export const MODE_OPTIONS: ExclusionMode[] = [10, 15, 20]
+
+// ── 발급용 조합 생성(현장 피드백 <추천번호> 6) ────────────────────────────────
+// 로직 적용 비율(%)에 따라 [통계 로직 조합 + 완전랜덤 조합]을 섞어 count 개를 만든다.
+// 예) count=10, ratio=70 → 로직 7 + 랜덤 3. 랜덤 조합은 제외수/품질필터 미적용(완전 무작위),
+// 단 로직 조합과의 중복만 회피한다. ratio 기본 100(전부 로직).
+
+const setKey = (s: readonly number[]) => s.join('-')
+
+/** 완전 랜덤 6/45 조합 count 개(avoid 와 중복 회피). */
+export function generateRandomSets(count: number, avoid: ReadonlySet<string> = new Set()): number[][] {
+  const out: number[][] = []
+  const seen = new Set(avoid)
+  let guard = 0
+  while (out.length < count && guard++ < count * 200) {
+    const pool = Array.from({ length: LOTTO_MAX - LOTTO_MIN + 1 }, (_, i) => i + LOTTO_MIN)
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    const set = pool.slice(0, LOTTO_PICK).sort((a, b) => a - b)
+    const k = setKey(set)
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(set)
+  }
+  return out
+}
+
+/** 발급 조합 = 로직 round(count×ratio%) + 완전랜덤 나머지. 모든 발급 경로(주간/수동/등급일괄)가 공유. */
+export function generateIssueSets(
+  rounds: readonly LottoRound[],
+  exclude: LottoExcludeSettings,
+  count: number,
+  logicRatio = 100,
+  seed?: number,
+): number[][] {
+  const total = Math.max(1, count)
+  const ratio = Math.max(0, Math.min(100, Math.round(logicRatio)))
+  const logicCount = Math.max(0, Math.min(total, Math.round((total * ratio) / 100)))
+  const sets =
+    logicCount > 0
+      ? generateRecommendation(rounds, exclude, { mode: 20, setCount: logicCount, seed }).sets
+      : []
+  const randomCount = total - sets.length
+  if (randomCount > 0) sets.push(...generateRandomSets(randomCount, new Set(sets.map(setKey))))
+  return sets
+}

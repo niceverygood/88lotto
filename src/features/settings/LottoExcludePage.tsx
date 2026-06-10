@@ -51,10 +51,12 @@ export function LottoExcludePage() {
   // 무료회원 주간 발급 설정(현장 피드백)
   const [recoEnabled, setRecoEnabled] = useState(true)
   const [recoCount, setRecoCount] = useState('30')
+  const [recoRatio, setRecoRatio] = useState('100') // 로직 적용 비율 %(현장 피드백)
   useEffect(() => {
     if (settings?.weekly_free_reco) {
       setRecoEnabled(settings.weekly_free_reco.enabled)
       setRecoCount(String(settings.weekly_free_reco.set_count))
+      setRecoRatio(String(settings.weekly_free_reco.logic_ratio ?? 100))
     }
   }, [settings])
 
@@ -129,7 +131,11 @@ export function LottoExcludePage() {
     if (!settings) return
     const next: SiteSettings = {
       ...settings,
-      weekly_free_reco: { enabled: recoEnabled, set_count: Math.max(1, Number(recoCount) || 30) },
+      weekly_free_reco: {
+        enabled: recoEnabled,
+        set_count: Math.max(1, Number(recoCount) || 30),
+        logic_ratio: Math.max(0, Math.min(100, Number(recoRatio) || 0)),
+      },
     }
     await save.mutateAsync(next)
   }
@@ -321,8 +327,8 @@ export function LottoExcludePage() {
       </SectionCard>
 
       <SectionCard
-        title="무료회원 주간 발급"
-        desc="매주 금요일 09:00, 무료회원에게 추천 조합을 자동 발급합니다(문자 발송 없음). 회원은 홈페이지에서 전화번호/뒷4자리로 로그인해 확인합니다. 실제 발급 실행은 추천번호 화면의 ‘지금 발급’ 또는 운영 환경의 예약 작업이 담당합니다."
+        title="추천조합 발급 설정"
+        desc="무료회원은 매주 금요일 09:00 자동 발급(문자 발송 없음), 그 외 등급은 추천번호 화면에서 등급 선택 후 일괄 발급합니다. 회원은 홈페이지에서 전화번호/뒷4자리로 로그인해 확인합니다."
       >
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex items-center gap-2 pb-2 text-[13px] text-gray-700">
@@ -330,7 +336,7 @@ export function LottoExcludePage() {
             주간 자동발급 사용
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11.5px] font-semibold text-gray-500">발급 조합 수</span>
+            <span className="mb-1 block text-[11.5px] font-semibold text-gray-500">발급 조합 수(기본)</span>
             <input
               className={fieldCls}
               inputMode="numeric"
@@ -338,12 +344,23 @@ export function LottoExcludePage() {
               onChange={(e) => setRecoCount(e.target.value.replace(/\D/g, ''))}
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-[11.5px] font-semibold text-gray-500">로직 적용 비율(%)</span>
+            <input
+              className={fieldCls}
+              inputMode="numeric"
+              placeholder="예: 70"
+              value={recoRatio}
+              onChange={(e) => setRecoRatio(e.target.value.replace(/\D/g, ''))}
+            />
+          </label>
           <Button variant="pri" size="sm" disabled={save.isPending} onClick={onSaveReco}>
             저장
           </Button>
         </div>
         <p className="mt-2 text-[11.5px] text-gray-400">
-          기본값 30조합. 발급 번호는 ‘공통(전체)’ 또는 무료 등급 고정·제외 규칙을 적용해 생성됩니다.
+          조합 수는 회원별 설정(회원정보창)이 우선, 없으면 기본값. 로직 비율 예) 10조합·70% → 로직 7 +
+          완전랜덤 3. 발급 번호는 등급별 고정·제외 규칙(없으면 공통)을 적용해 생성됩니다.
         </p>
       </SectionCard>
     </div>

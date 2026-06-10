@@ -79,6 +79,9 @@ export function MembersPage() {
   const inflowF = get('inflow')
   const inflowTypeF = get('it')
   const consultF = get('cs')
+  const dupF = get('dup') === '1' // 중복 디비만(현장 피드백)
+  const regFromF = get('rf') // 가입일 from (YYYY-MM-DD)
+  const regToF = get('rt') // 가입일 to
 
   const extra: MemberFilter = {
     grade: gradeF,
@@ -87,6 +90,9 @@ export function MembersPage() {
     inflowCode: inflowF,
     inflowType: inflowTypeF,
     consultStatus: consultF,
+    dupPhone: dupF || undefined,
+    registeredFrom: regFromF,
+    registeredTo: regToF,
   }
 
   const query: MembersQuery = {
@@ -166,6 +172,13 @@ export function MembersPage() {
     chips.push({ key: 'it', label: `유입구분: ${inflowTypeF}`, onRemove: () => remove('it') })
   if (consultF)
     chips.push({ key: 'cs', label: `상담상태: ${consultF}`, onRemove: () => remove('cs') })
+  if (dupF) chips.push({ key: 'dup', label: '중복 디비만', onRemove: () => remove('dup') })
+  if (regFromF || regToF)
+    chips.push({
+      key: 'reg',
+      label: `가입일: ${regFromF ?? '…'} ~ ${regToF ?? '…'}`,
+      onRemove: () => setMany({ rf: null, rt: null }, { resetPage: true }),
+    })
 
   const clearAll = () => clear(['view'])
 
@@ -344,6 +357,33 @@ export function MembersPage() {
                 </option>
               ))}
             </select>
+          </Field>
+          {/* 가입일 범위 + 중복 디비(현장 피드백) */}
+          <Field label="가입일(부터)">
+            <input
+              type="date"
+              className={selectCls}
+              value={regFromF ?? ''}
+              onChange={(e) => set('rf', e.target.value || null, { resetPage: true })}
+            />
+          </Field>
+          <Field label="가입일(까지)">
+            <input
+              type="date"
+              className={selectCls}
+              value={regToF ?? ''}
+              onChange={(e) => set('rt', e.target.value || null, { resetPage: true })}
+            />
+          </Field>
+          <Field label="중복 디비">
+            <label className="flex h-9 cursor-pointer items-center gap-2 text-[12.5px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={dupF}
+                onChange={(e) => set('dup', e.target.checked ? '1' : null, { resetPage: true })}
+              />
+              중복 입력된 디비만
+            </label>
           </Field>
         </div>
       </FilterBar>

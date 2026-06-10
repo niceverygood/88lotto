@@ -10,7 +10,7 @@ import { genId, nowIso } from '@/lib/db/store'
 import { renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
 import { resolveExcludeForGrade } from '@/lib/lotto'
-import { generateRecommendation } from '@/lib/lottoGenerator'
+import { generateIssueSets } from '@/lib/lottoGenerator'
 import type { ManualIssueInput, MemberCreateInput, MemberPatch, MySmsRow } from './api'
 
 function sb(): SupabaseClient {
@@ -372,6 +372,19 @@ export async function requestPayment(
   await pushLog({ kind: 'admin', actor, action: 'payment.request', target_type: 'member', target_id: v.memberId, meta: { product_id: v.productId, amount: v.amount, method: v.method } })
 }
 
+/** 콜메모 소프트삭제(<회원정보창> 7) — deleted_at 마킹, member.memo=미삭제 최신으로 동기화. */
+export async function deleteMemo(id: string, memoId: string, actor: string | null): Promise<void> {
+  const { data: cur } = await sb().from('members').select('meta').eq('id', id).maybeSingle()
+  const meta = ((cur as { meta: Record<string, unknown> } | null)?.meta ?? {}) as Record<string, unknown>
+  const list = (Array.isArray(meta.memos) ? (meta.memos as { id: string; body: string; deleted_at?: string | null }[]) : []).map(
+    (e) => (e.id === memoId ? { ...e, deleted_at: nowIso(), deleted_by: actor } : e),
+  )
+  const latest = [...list].reverse().find((e) => !e.deleted_at)?.body ?? null
+  const { error } = await sb().from('members').update({ meta: { ...meta, memos: list }, memo: latest }).eq('id', id)
+  if (error) throw error
+  await pushLog({ kind: 'admin', actor, action: 'member.memo_delete', target_type: 'member', target_id: id, meta: { memo_id: memoId } })
+}
+
 export async function bulkUpdateMembers(
   ids: string[],
   patch: MemberPatch & { inflow_type?: string },
@@ -579,7 +592,8 @@ export async function manualIssueReco(
   const rounds = (rData ?? []) as LottoRound[]
   const exclude = resolveExcludeForGrade(settings, member.grade)
   const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
-  const res = generateRecommendation(rounds, exclude, { mode: 20, setCount: Math.max(1, v.setCount) })
+  const ratio = settings.weekly_free_reco?.logic_ratio ?? 100
+  const res = { sets: generateIssueSets(rounds, exclude, Math.max(1, v.setCount), ratio) }
   const ts = nowIso()
   const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets: res.sets }
   const recos = Array.isArray(member.meta?.weekly_recos) ? (member.meta!.weekly_recos as WeeklyRecoIssue[]) : []

@@ -22,6 +22,9 @@ export interface MemberFilter {
   inflowType?: string // 유입구분(콜 단계) 필터 — 현장 피드백
   consultStatus?: string // 상담상태 필터 — 현장 피드백
   registeredToday?: boolean
+  registeredFrom?: string // 가입일 범위(YYYY-MM-DD, 포함) — 현장 피드백
+  registeredTo?: string
+  dupPhone?: boolean // 전화번호 중복 입력된 디비만 — 현장 피드백
   inactiveDays?: number // last_active 가 N일 이상 경과(또는 한 번도 미접속)
   dupInflow?: 'today' | 'all' // 동일 유입코드가 2건 이상
   retry?: boolean // 아웃콜 완료했으나 미전환(재접촉 대상) — 추정 정의
@@ -227,6 +230,25 @@ function matchesSearch(m: Member, q: string): boolean {
   )
 }
 
+/** 전화번호(숫자)가 2건 이상 등록된 번호 집합 — '중복' 디비 필터용(현장 피드백). */
+function dupPhoneSet(members: readonly Member[]): Set<string> {
+  const counts = new Map<string, number>()
+  for (const m of members) {
+    const d = normalizePhone(m.phone)
+    if (!d) continue
+    counts.set(d, (counts.get(d) ?? 0) + 1)
+  }
+  const out = new Set<string>()
+  for (const [d, c] of counts) if (c > 1) out.add(d)
+  return out
+}
+
+// 가입일 범위 비교용 — registered_at(ISO) → 로컬 YYYY-MM-DD.
+function localDateStr(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** 세그먼트 필터 + 통합검색을 멤버 배열에 적용한다. RLS(역할 데이터 스코프)는 api 계층에서 별도 처리. */
 export function filterMembers(
   members: readonly Member[],
@@ -234,6 +256,7 @@ export function filterMembers(
   ctx: MemberFilterCtx,
 ): Member[] {
   const dupSet = filter.dupInflow ? dupInflowCodes(members, filter.dupInflow, ctx.now) : null
+  const dupPhones = filter.dupPhone ? dupPhoneSet(members) : null
 
   return members.filter((m) => {
     if (filter.status && m.status !== filter.status) return false
@@ -257,6 +280,12 @@ export function filterMembers(
     if (filter.inflowType && m.inflow_type !== filter.inflowType) return false
     if (filter.consultStatus && m.consult_status !== filter.consultStatus) return false
     if (filter.registeredToday && !isSameDay(m.registered_at, ctx.now)) return false
+    if (filter.registeredFrom || filter.registeredTo) {
+      const d = localDateStr(m.registered_at)
+      if (filter.registeredFrom && d < filter.registeredFrom) return false
+      if (filter.registeredTo && d > filter.registeredTo) return false
+    }
+    if (dupPhones && !dupPhones.has(normalizePhone(m.phone))) return false
     if (filter.inactiveDays !== undefined) {
       const last = m.last_active_at ? Date.parse(m.last_active_at) : null
       const inactive = last === null || ctx.now - last >= filter.inactiveDays * 864e5
