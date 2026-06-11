@@ -2,7 +2,8 @@
 // 데이터: useRounds('all')(회차 통계) + useSiteSettings(수동 고정·제외). 생성은 순수 lib/lottoGenerator.
 // §8 외 부수효과 없음(읽기·계산 전용). 확률 향상 단언 없이 사실대로 안내.
 import { useMemo, useState } from 'react'
-import { BookOpen, Check, ChevronDown, Dices, Gift, Info, RefreshCw } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { BookOpen, Check, ChevronDown, Dices, Gift, Info, RefreshCw, Settings as SettingsIcon } from 'lucide-react'
 import { Button, ConfirmModal, LottoBalls, PageHeader } from '@/design-system/components'
 import { usePageMeta } from '@/app/uiStore'
 import { useRole } from '@/lib/auth'
@@ -277,7 +278,18 @@ export function RecommendPage() {
       {/* 컨트롤 */}
       <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4">
         <div>
-          <div className="mb-1 text-[11.5px] font-semibold text-gray-500">대상 등급</div>
+          <div className="mb-1 flex items-center gap-2 text-[11.5px] font-semibold text-gray-500">
+            대상 등급
+            {/* 등급별 고정/제외 '설정' 위치 동선(현장 피드백 6/11) — 설정 화면으로 바로가기 */}
+            {canIssue && (
+              <Link
+                to="/settings/lotto-exclude"
+                className="inline-flex items-center gap-0.5 font-normal text-primary-600 hover:underline"
+              >
+                <SettingsIcon className="h-3 w-3" /> 등급별 고정·제외 설정
+              </Link>
+            )}
+          </div>
           <select
             value={grade ?? ''}
             onChange={(e) => {
