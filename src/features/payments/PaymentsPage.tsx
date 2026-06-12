@@ -60,6 +60,8 @@ export function PaymentsPage() {
   const methodF = get('m') as PaymentMethod | undefined
   const pgF = get('pg')
   const staffF = get('staff')
+  const dateFromF = get('rf') // 결제일 범위(현장 피드백)
+  const dateToF = get('rt')
 
   const query: PaymentsQuery = {
     status: statusTab,
@@ -67,6 +69,8 @@ export function PaymentsPage() {
     method: methodF ?? '',
     pg: pgF,
     staffId: staffF,
+    dateFrom: dateFromF,
+    dateTo: dateToF,
     page,
     pageSize: PAGE_SIZE,
     sortId,
@@ -109,6 +113,12 @@ export function PaymentsPage() {
     const name = staff.find((s) => s.id === staffF)?.name ?? staffF
     chips.push({ key: 'staff', label: `담당: ${name}`, onRemove: () => remove('staff') })
   }
+  if (dateFromF || dateToF)
+    chips.push({
+      key: 'date',
+      label: `결제일: ${dateFromF ?? '…'} ~ ${dateToF ?? '…'}`,
+      onRemove: () => setMany({ rf: null, rt: null }, { resetPage: true }),
+    })
 
   return (
     <div>
@@ -136,7 +146,7 @@ export function PaymentsPage() {
         chips={chips}
         onClearAll={chips.length > 0 ? () => clear(['st']) : undefined}
       >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Field label="결제수단">
             <select
               className={selectCls}
@@ -178,6 +188,23 @@ export function PaymentsPage() {
                 </option>
               ))}
             </select>
+          </Field>
+          {/* 결제일 범위(현장 피드백) — 승인일(paid_at) 기준, 미승인 건은 등록일 */}
+          <Field label="결제일(부터)">
+            <input
+              type="date"
+              className={selectCls}
+              value={dateFromF ?? ''}
+              onChange={(e) => set('rf', e.target.value || null, { resetPage: true })}
+            />
+          </Field>
+          <Field label="결제일(까지)">
+            <input
+              type="date"
+              className={selectCls}
+              value={dateToF ?? ''}
+              onChange={(e) => set('rt', e.target.value || null, { resetPage: true })}
+            />
           </Field>
         </div>
       </FilterBar>

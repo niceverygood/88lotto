@@ -32,7 +32,8 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/dashboard'
+  // 기본 랜딩은 '/'(RoleHome) — 역할별 분기(팀장=/members)를 한 곳에서 처리(현장 피드백 6/11).
+  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/'
 
   if (user) return <Navigate to={from} replace />
 
