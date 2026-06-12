@@ -100,6 +100,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   // 결제 요청
   const [payProduct, setPayProduct] = useState('')
   const [payMethod, setPayMethod] = useState<PaymentMethod>('bank')
+  const [payAmount, setPayAmount] = useState('') // 금액 수기 입력(현장 피드백 <결제> 1) — 상품 선택 시 기본값
 
   useEffect(() => {
     setMemoDraft('') // 새 콜메모 입력칸(리스트형 누적) — 회원 전환 시 비움
@@ -111,6 +112,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     setHpPw(metaStr(member?.meta, 'homepage_pw'))
     setPayProduct('')
     setPayMethod('bank')
+    setPayAmount('')
     setSmsBody('')
     setIssueCount('')
     setIssueSms(false)
@@ -376,7 +378,12 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                   <select
                     className={selectCls + ' flex-1'}
                     value={payProduct}
-                    onChange={(e) => setPayProduct(e.target.value)}
+                    onChange={(e) => {
+                      setPayProduct(e.target.value)
+                      // 금액 기본값 = 상품가(수기 수정 가능, <결제> 1)
+                      const p = activeProducts.find((x) => x.id === e.target.value)
+                      setPayAmount(p ? String(p.price) : '')
+                    }}
                   >
                     <option value="">상품 선택</option>
                     {activeProducts.map((p) => (
@@ -385,6 +392,13 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                       </option>
                     ))}
                   </select>
+                  <input
+                    className={selectCls + ' w-[110px] text-right font-mono tnum'}
+                    inputMode="numeric"
+                    placeholder="금액"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value.replace(/\D/g, ''))}
+                  />
                   <select
                     className={selectCls}
                     value={payMethod}
@@ -399,12 +413,17 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                   <Button
                     size="sm"
                     variant="pri"
-                    disabled={!selected || requestPayment.isPending}
+                    disabled={!selected || !(Number(payAmount) > 0) || requestPayment.isPending}
                     onClick={() =>
                       selected &&
                       requestPayment.mutate(
-                        { memberId: id, productId: selected.id, amount: selected.price, method: payMethod },
-                        { onSuccess: () => setPayProduct('') },
+                        { memberId: id, productId: selected.id, amount: Number(payAmount), method: payMethod },
+                        {
+                          onSuccess: () => {
+                            setPayProduct('')
+                            setPayAmount('')
+                          },
+                        },
                       )
                     }
                   >
@@ -412,7 +431,11 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                   </Button>
                 </div>
                 <p className="mt-1.5 text-[11px] text-gray-500">
-                  요청 시 ‘대기’ 결제가 생성되고, 최고관리자/관리자가 결제 모듈에서 승인합니다.
+                  금액은 상품가가 기본이며 수기로 수정할 수 있습니다
+                  {Number(payAmount) > 0 && selected && Number(payAmount) !== selected.price
+                    ? ` (현재 ${krw(Number(payAmount))} — 상품가 ${krw(selected.price)}와 다름)`
+                    : ''}
+                  . 요청 시 ‘대기’ 결제가 생성되고, 최고관리자/관리자가 결제 모듈에서 승인합니다.
                 </p>
               </div>
             )
