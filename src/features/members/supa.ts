@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { genId, nowIso } from '@/lib/db/store'
 import { renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
+import { selectAll } from '@/lib/db/remote'
 import { resolveExcludeForGrade } from '@/lib/lotto'
 import { generateIssueSets } from '@/lib/lottoGenerator'
 import type { ManualIssueInput, MemberCreateInput, MemberPatch, MySmsRow } from './api'
@@ -587,9 +588,7 @@ export async function manualIssueReco(
   const { data: sData, error: se } = await sb().from('site_settings').select('*').eq('id', 1).maybeSingle()
   if (se) throw se
   const settings = sData as SiteSettings
-  const { data: rData, error: re } = await sb().from('lotto_rounds').select('*')
-  if (re) throw re
-  const rounds = (rData ?? []) as LottoRound[]
+  const rounds = await selectAll<LottoRound>('lotto_rounds') // 1000행 캡 회피(페이지네이션)
   const exclude = resolveExcludeForGrade(settings, member.grade)
   const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
   const ratio = settings.weekly_free_reco?.logic_ratio ?? 100

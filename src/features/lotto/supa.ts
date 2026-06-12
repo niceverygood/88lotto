@@ -6,7 +6,7 @@
 // TODO(live-verify): 회차 베팅 채점은 행 단위 update — 대량 회차는 RPC(set-based)로 이관 권장.
 import type { Bet, Grade, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { nowIso } from '@/lib/db/store'
-import { insertLog, fetchSiteSettings, sb } from '@/lib/db/remote'
+import { insertLog, fetchSiteSettings, sb, selectAll } from '@/lib/db/remote'
 import { gradeRank, lottoSum, oddEven, prizeForRank } from '@/lib/lotto'
 import { generateIssueSets } from '@/lib/lottoGenerator'
 import {
@@ -147,9 +147,7 @@ export async function issueGradeReco(grade: Grade, actor: string | null): Promis
   const cfg = settings.weekly_free_reco ?? WEEKLY_FREE_RECO_DEFAULT
   const setCount = Math.max(1, cfg.set_count || WEEKLY_FREE_RECO_DEFAULT.set_count)
   const ratio = cfg.logic_ratio ?? 100
-  const { data: rdata, error: re } = await sb().from('lotto_rounds').select('*')
-  if (re) throw re
-  const rounds = (rdata ?? []) as LottoRound[]
+  const rounds = await selectAll<LottoRound>('lotto_rounds') // 1000행 캡 회피(페이지네이션)
   const exclude = resolveExcludeForGrade(settings, grade)
   const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
 

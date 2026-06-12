@@ -519,9 +519,15 @@ export default async function handler(req: any, res: any) {
     const ratio = Math.max(0, Math.min(100, cfg.logic_ratio ?? 100)) // 로직:랜덤 비율(현장 피드백)
     if (!cfg.enabled && !force) return res.status(200).json({ ok: true, skipped: 'disabled' })
 
-    const { data: rData, error: re } = await sb.from('lotto_rounds').select('*')
-    if (re) throw re
-    const rounds = (rData ?? []) as LottoRound[]
+    // PostgREST 1000행 캡 회피 — range 페이지네이션으로 전 회차 조회.
+    const rounds: LottoRound[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data: rData, error: re } = await sb.from('lotto_rounds').select('*').range(from, from + 999)
+      if (re) throw re
+      const page = (rData ?? []) as LottoRound[]
+      rounds.push(...page)
+      if (page.length < 1000) break
+    }
     const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
     const baseCount = Math.max(1, cfg.set_count || DEFAULT_COUNT)
     // 등급별 고정/제외 규칙(없으면 공통 폴백) — 등급당 1회 해석 캐시.
@@ -536,13 +542,21 @@ export default async function handler(req: any, res: any) {
     }
 
     // 전 등급 조회 — 무료=기본 금요일, 그 외 등급=발송요일 설정된 회원만(6/11 피드백).
-    const { data: mData, error: me } = await sb
-      .from('members')
-      .select('id, grade, meta')
-      .eq('is_deleted', false)
-      .eq('is_withdrawn', false)
-    if (me) throw me
-    const rows = (mData ?? []) as { id: string; grade: string; meta: Record<string, unknown> | null }[]
+    // 대량(15만) 대비 range 페이지네이션.
+    const rows: { id: string; grade: string; meta: Record<string, unknown> | null }[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data: mData, error: me } = await sb
+        .from('members')
+        .select('id, grade, meta')
+        .eq('is_deleted', false)
+        .eq('is_withdrawn', false)
+        .order('id')
+        .range(from, from + 999)
+      if (me) throw me
+      const page = (mData ?? []) as typeof rows
+      rows.push(...page)
+      if (page.length < 1000) break
+    }
 
     let issued = 0
     let skippedRound = 0

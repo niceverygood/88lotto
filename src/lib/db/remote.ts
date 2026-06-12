@@ -18,10 +18,19 @@ export function sb(): SupabaseClient {
 type ArrayKey = Exclude<keyof DbShape, 'nav_access' | 'site_settings'>
 
 /** 단일 테이블 전체 조회(RLS 스코프 자동 적용). */
+// PostgREST 는 응답을 기본 1000행으로 캡한다 → range 페이지네이션으로 전량 조회.
+// (회차 1,227건 적재 후 발견 — 단건 select('*') 는 최신 회차가 잘려나감)
 export async function selectAll<T>(table: string): Promise<T[]> {
-  const { data, error } = await sb().from(table).select('*')
-  if (error) throw error
-  return (data ?? []) as T[]
+  const PAGE = 1000
+  const out: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb().from(table).select('*').range(from, from + PAGE - 1)
+    if (error) throw error
+    const rows = (data ?? []) as T[]
+    out.push(...rows)
+    if (rows.length < PAGE) break
+  }
+  return out
 }
 
 /** 여러 배열 테이블을 병렬 조회해 readDb()-호환 부분 스냅샷으로 반환. */
