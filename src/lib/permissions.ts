@@ -40,17 +40,18 @@ export const ADMIN_LOCKED: NavKey[] = ['admins', 'logs']
 // 메뉴 노출 기본 매트릭스 (CLAUDE §5). 권한관리(/admins/roles)에서 편집 → DB nav_access 로 영속.
 // 데이터 접근은 RLS(lib/rls/policies.sql)로 이중 통제.
 // TODO(live-verify): `08 권한관리` 화면 미확인 → 아래는 합리적 기본값. ASSUMPTIONS 기록.
+// 현장 피드백(6/11 메인메뉴): 팀장(rep)=이용자·나의고객만, 실장(leader)=로또기록·추천번호 제외.
 export const DEFAULT_NAV_ACCESS: Record<NavKey, Role[]> = {
-  dashboard: ['admin', 'manager', 'leader', 'rep'],
+  dashboard: ['admin', 'manager', 'leader'],
   members: ['admin', 'manager', 'leader', 'rep'],
-  payments: ['admin', 'manager', 'leader', 'rep'],
+  payments: ['admin', 'manager', 'leader'],
   revenue: ['admin', 'manager', 'leader'],
   myCustomers: ['admin', 'manager', 'leader', 'rep'],
-  community: ['admin', 'manager', 'leader', 'rep'],
-  support: ['admin', 'manager', 'leader', 'rep'],
-  lotto: ['admin', 'manager', 'leader', 'rep'],
-  bets: ['admin', 'manager', 'leader', 'rep'],
-  // 계정관리(/admins)는 계층 위임(§5)으로 실장·팀장도 접근 — 본인 하위 직원만 스코프(AdminsPage).
+  community: ['admin', 'manager', 'leader'],
+  support: ['admin', 'manager', 'leader'],
+  lotto: ['admin', 'manager'],
+  bets: ['admin', 'manager', 'leader'],
+  // 계정관리(/admins)는 계층 위임(§5)으로 실장도 접근 — 본인 하위 직원만 스코프(AdminsPage).
   // 단, 권한 매트릭스(/admins/roles)는 RolesPage 내부에서 admin 전용으로 별도 가드.
   admins: ['admin', 'manager', 'leader'],
   logs: ['admin'],

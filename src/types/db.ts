@@ -304,5 +304,6 @@ export interface SiteSettings {
   lotto_exclude: LottoExcludeSettings // 현재 적용 스냅샷(폴백)
   lotto_exclude_history: LottoExcludeRule[] // 회차별 이력 + 효력일자(§V2-5)
   weekly_free_reco: WeeklyFreeRecoSettings // 무료회원 주간 자동발급(현장 피드백)
-  terms: string // 이용약관 본문
+  terms: string // 이용약관 본문(공통/기본)
+  terms_by_grade?: Partial<Record<Grade, string>> // 등급별 약관(현장 피드백 6/11) — 미설정 등급은 공통 폴백
 }

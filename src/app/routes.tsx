@@ -26,6 +26,13 @@ import { LottoExcludePage } from '@/features/settings/LottoExcludePage'
 import { TermsSettingsPage } from '@/features/settings/TermsSettingsPage'
 import { ComponentsPage } from '@/features/dev/ComponentsPage'
 import { PortalPage } from '@/features/portal/PortalPage'
+import { useRole } from '@/lib/auth'
+
+// 랜딩 분기(현장 피드백 6/11): 팀장(rep)은 메뉴가 이용자·나의고객뿐이라 /members 로 보낸다.
+function RoleHome() {
+  const role = useRole()
+  return <Navigate to={role === 'rep' ? '/members' : '/dashboard'} replace />
+}
 
 /**
  * 라우트 정의. /login·/portal(고객 홈페이지) 은 셸 밖, 그 외는 RequireAuth 로 보호.
@@ -45,7 +52,7 @@ export function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route index element={<RoleHome />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/members" element={<RequireNav navKey="members"><MembersPage /></RequireNav>} />
         <Route path="/my/customers" element={<RequireNav navKey="myCustomers"><MyCustomersPage /></RequireNav>} />

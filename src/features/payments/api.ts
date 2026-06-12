@@ -102,6 +102,8 @@ export interface PaymentsQuery {
   method?: PaymentMethod | ''
   pg?: string
   staffId?: string
+  dateFrom?: string // 결제일 범위(YYYY-MM-DD, 포함) — 현장 피드백. paid_at 없으면 created_at 기준
+  dateTo?: string
   page: number
   pageSize: number
   sortId?: string
@@ -114,11 +116,22 @@ export interface PaymentsResult {
   pageCount: number
 }
 
+// 결제일 비교용 — paid_at(승인일) 우선, 없으면 created_at(등록일). 로컬 YYYY-MM-DD.
+function paymentDateStr(p: PaymentRow): string {
+  const d = new Date(p.paid_at ?? p.created_at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function matchFilters(p: PaymentRow, q: PaymentsQuery): boolean {
   if (q.status && q.status !== 'all' && p.status !== q.status) return false
   if (q.method && p.method !== q.method) return false
   if (q.pg && p.pg_provider !== q.pg) return false
   if (q.staffId && p.staff_id !== q.staffId) return false
+  if (q.dateFrom || q.dateTo) {
+    const d = paymentDateStr(p)
+    if (q.dateFrom && d < q.dateFrom) return false
+    if (q.dateTo && d > q.dateTo) return false
+  }
   if (q.search) {
     const s = q.search.trim().toLowerCase()
     if (s) {

@@ -136,6 +136,7 @@ function toSettings(v: FormValues, prev: SiteSettings): SiteSettings {
     lotto_exclude_history: prev.lotto_exclude_history,
     weekly_free_reco: prev.weekly_free_reco ?? { enabled: true, set_count: 30 },
     terms: prev.terms,
+    terms_by_grade: prev.terms_by_grade,
   }
 }
 

@@ -1,6 +1,8 @@
-// Vercel 크론 함수 — 무료회원 주간 추천조합 자동발급(현장 피드백: 매주 금 09:00, 문자발송 X).
-// vercel.json crons 가 매일 00:00 UTC(=09:00 KST) 호출 → 회원별 발송요일(meta.weekly_reco_day,
-// 기본 금=5)이 '오늘(KST)'인 무료회원에게 발급한다. 멱등: 동일 회차 기발급 회원은 skip.
+// Vercel 크론 함수 — 회원 추천조합 자동발급(현장 피드백, 문자발송 X).
+// vercel.json crons 가 매일 00:00 UTC(=09:00 KST) 호출.
+// 대상(현장 피드백 6/11 <추천번호> 7): ① 무료회원 = 기본 금요일(회원별 weekly_reco_day 우선)
+// ② 유료 등 그 외 등급 = 회원정보창에 발송요일이 '설정된' 회원만, 그 요일에 발급.
+// 세트수 = 회원별 weekly_reco_count(없으면 전역), 등급별 고정/제외 규칙 적용. 멱등(동일 회차 skip).
 //
 // ⚠️ 완전 자급자족 단일 파일: Vercel 함수 런타임(ESM)이 api/ 상대 import 를 해석하지 못해
 // src/lib/lottoGenerator.ts 의 생성 로직 사본 + 최소 타입을 인라인한다(원본 수정 시 동기화).
@@ -521,28 +523,43 @@ export default async function handler(req: any, res: any) {
     if (re) throw re
     const rounds = (rData ?? []) as LottoRound[]
     const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
-    const exclude = resolveExcludeForGrade(settings, 'free')
     const baseCount = Math.max(1, cfg.set_count || DEFAULT_COUNT)
+    // 등급별 고정/제외 규칙(없으면 공통 폴백) — 등급당 1회 해석 캐시.
+    const excludeByGrade = new Map<string, LottoExcludeSettings>()
+    const excludeFor = (grade: string): LottoExcludeSettings => {
+      let e = excludeByGrade.get(grade)
+      if (!e) {
+        e = resolveExcludeForGrade(settings, grade)
+        excludeByGrade.set(grade, e)
+      }
+      return e
+    }
 
+    // 전 등급 조회 — 무료=기본 금요일, 그 외 등급=발송요일 설정된 회원만(6/11 피드백).
     const { data: mData, error: me } = await sb
       .from('members')
-      .select('id, meta')
-      .eq('grade', 'free')
+      .select('id, grade, meta')
       .eq('is_deleted', false)
       .eq('is_withdrawn', false)
     if (me) throw me
-    const rows = (mData ?? []) as { id: string; meta: Record<string, unknown> | null }[]
+    const rows = (mData ?? []) as { id: string; grade: string; meta: Record<string, unknown> | null }[]
 
     let issued = 0
     let skippedRound = 0
     let skippedDay = 0
     for (const r of rows) {
       const meta = r.meta ?? {}
-      const day = typeof meta.weekly_reco_day === 'number' ? (meta.weekly_reco_day as number) : DEFAULT_DAY
-      if (!force && day !== today) {
+      const day =
+        typeof meta.weekly_reco_day === 'number'
+          ? (meta.weekly_reco_day as number)
+          : r.grade === 'free'
+            ? DEFAULT_DAY
+            : null // 유료 등 — 발송요일 미설정이면 자동발급 대상 아님
+      if (day === null || (!force && day !== today)) {
         skippedDay++
         continue
       }
+      const exclude = excludeFor(r.grade)
       const recos = Array.isArray(meta.weekly_recos) ? (meta.weekly_recos as WeeklyRecoIssue[]) : []
       if (recos[0]?.round_no === targetRound) {
         skippedRound++

@@ -50,7 +50,8 @@ const DB_KEY = 'pluslotto-db'
 // v10: 고정/제외 등급별 규칙 + 유입구분 콜단계 + 콜메모 리스트 + DB초기화 가입일시 갱신(현장 피드백).
 // v11: 무료회원 주간 발급 설정(site_settings.weekly_free_reco) + member.meta.weekly_recos(현장 피드백).
 // v12: 유입구분 '구디비' 추가 + member.consult_status(상담상태) 추가(현장 피드백).
-const DB_VERSION = 12
+// v13: 역할별 메뉴 축소(팀장=이용자·나의고객, 실장=로또 제외) + 등급별 약관(현장 피드백 6/11).
+const DB_VERSION = 13
 
 interface Persisted {
   __v: number
