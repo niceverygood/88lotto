@@ -49,7 +49,8 @@ async function pushLog(row: {
       meta: row.meta ?? {},
       created_at: nowIso(),
     })
-  if (error) throw error
+  // 감사 로그는 best-effort — 실패해도 실제 작업(발송·결제 등)을 막지 않는다.
+  if (error) console.warn('pushLog 실패(무시):', error.message)
 }
 
 // ── 읽기 ──────────────────────────────────────────────────────────────────

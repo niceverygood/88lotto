@@ -484,7 +484,12 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
               variant="acc"
               icon={<Send className="h-3.5 w-3.5" />}
               disabled={!smsTpl || sendSms.isPending}
-              onClick={() => sendSms.mutate({ ids: [id], templateKey: smsTpl })}
+              onClick={() =>
+                sendSms.mutate(
+                  { ids: [id], templateKey: smsTpl },
+                  { onError: (e) => window.alert(e instanceof Error ? e.message : '문자 발송에 실패했습니다.') },
+                )
+              }
             >
               발송
             </Button>
@@ -509,7 +514,13 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                 icon={<Send className="h-3.5 w-3.5" />}
                 disabled={!smsBody.trim() || sendCustomSms.isPending}
                 onClick={() =>
-                  sendCustomSms.mutate({ ids: [id], body: smsBody }, { onSuccess: () => setSmsBody('') })
+                  sendCustomSms.mutate(
+                    { ids: [id], body: smsBody },
+                    {
+                      onSuccess: () => setSmsBody(''),
+                      onError: (e) => window.alert(e instanceof Error ? e.message : '문자 발송에 실패했습니다.'),
+                    },
+                  )
                 }
               >
                 직접 발송
