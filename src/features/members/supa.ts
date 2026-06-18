@@ -523,28 +523,44 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
   const { data: memData, error: me } = await sb().from('members').select('*').in('id', ids)
   if (me) throw me
   const members = (memData ?? []) as Member[]
+  const { realSend, sender_no, adOptout } = await fetchSmsConfig()
   const ts = nowIso()
   const type = smsTypeForTemplate(templateKey)
-  const rows = members.map((m) => ({
-    id: genId('sms'),
-    member_id: m.id,
-    template_key: templateKey,
-    phone: m.phone,
-    body: tpl ? renderSms(tpl.body, m) : '',
-    type,
-    status: '발송완료',
-    sent_at: ts,
-  }))
+  const rows: SmsSend[] = []
+  for (const m of members) {
+    let body = tpl ? renderSms(tpl.body, m) : ''
+    if (type === 'marketing' && adOptout) body = `(광고)${body}\n무료거부 ${adOptout}`
+    // 실발송(oneshot_enabled+발신번호) 시 OneShot 호출 — 미설정이면 '미발송'으로 기록만.
+    let status = '미발송'
+    if (realSend) {
+      const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sender_no })
+      status = r.ok ? '발송완료' : `실패(${r.code ?? '?'})`
+    }
+    rows.push({
+      id: genId('sms'),
+      member_id: m.id,
+      template_key: templateKey,
+      phone: m.phone,
+      body,
+      type,
+      status,
+      sent_at: ts,
+    })
+  }
   const { error: e2 } = await sb().from('sms_sends').insert(rows)
   if (e2) throw e2
-  await pushLog({ kind: 'sms', actor, action: 'sms.send', target_type: 'member', target_id: null, meta: { count: ids.length, template: templateKey } })
+  await pushLog({ kind: 'sms', actor, action: 'sms.send', target_type: 'member', target_id: null, meta: { count: rows.length, template: templateKey, real: realSend } })
 }
 
 // 사이트 설정의 문자(oneshot) 게이트 — 실발송 여부 판단용.
-async function fetchSmsConfig(): Promise<{ realSend: boolean; sender_no: string }> {
+async function fetchSmsConfig(): Promise<{ realSend: boolean; sender_no: string; adOptout: string }> {
   const { data } = await sb().from('site_settings').select('sms').eq('id', 1).maybeSingle()
   const sms = (data as { sms: SiteSettings['sms'] } | null)?.sms
-  return { realSend: !!sms?.oneshot_enabled && !!sms.sender_no, sender_no: sms?.sender_no ?? '' }
+  return {
+    realSend: !!sms?.oneshot_enabled && !!sms.sender_no,
+    sender_no: sms?.sender_no ?? '',
+    adOptout: sms?.ad_optout ?? '',
+  }
 }
 
 /** 직접 입력 문자 발송(<회원정보창> 3) — 템플릿 없이 자유 본문. 실발송 게이트는 mock 과 동일. */
@@ -556,7 +572,7 @@ export async function sendCustomSms(ids: string[], body: string, actor: string |
   const ts = nowIso()
   const rows: SmsSend[] = []
   for (const m of members) {
-    let status = '발송완료'
+    let status = '미발송'
     if (realSend) {
       const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sender_no })
       status = r.ok ? '발송완료' : '실패'
@@ -604,7 +620,7 @@ export async function manualIssueReco(
     const lines = res.sets.map((s, i) => `${i + 1}) ${s.join(' ')}`)
     const body = `[플러스로또] ${targetRound}회 추천번호 ${res.sets.length}조합\n${lines.join('\n')}`
     const { realSend, sender_no } = await fetchSmsConfig()
-    let status = '발송완료'
+    let status = '미발송'
     if (realSend) {
       const r = await sendOneShot({ dest_phone: member.phone, msg_body: body, send_phone: sender_no })
       status = r.ok ? '발송완료' : '실패'

@@ -921,7 +921,7 @@ export function useSendSms() {
       for (const m of targets) {
         let body = tpl ? renderSms(tpl.body, m) : ''
         if (type === 'marketing' && sms?.ad_optout) body = `(광고)${body}\n무료거부 ${sms.ad_optout}`
-        let status = '발송완료'
+        let status = '미발송'
         if (realSend) {
           const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sms.sender_no })
           status = r.ok ? '발송완료' : '실패'
@@ -979,7 +979,7 @@ export function useSendCustomSms() {
       const ts = nowIso()
       const records: SmsSend[] = []
       for (const m of targets) {
-        let status = '발송완료'
+        let status = '미발송'
         if (realSend) {
           const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sms.sender_no })
           status = r.ok ? '발송완료' : '실패'

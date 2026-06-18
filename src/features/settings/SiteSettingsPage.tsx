@@ -61,9 +61,6 @@ const formSchema = z.object({
     sender_no: z.string().min(1, '발신번호를 입력하세요.'),
     smtnt_id: z.string(),
     smtntKeyNew: z.string(),
-    schedule_enabled: z.boolean(),
-    schedule_days_before: z.string().regex(/^\d+$/, '0 이상의 숫자'),
-    schedule_time: z.string(),
     oneshot_enabled: z.boolean(),
     ad_optout: z.string(),
   }),
@@ -88,9 +85,6 @@ function toForm(s: SiteSettings): FormValues {
       sender_no: s.sms.sender_no,
       smtnt_id: s.sms.smtnt_id,
       smtntKeyNew: '',
-      schedule_enabled: s.sms.schedule_enabled,
-      schedule_days_before: String(s.sms.schedule_days_before),
-      schedule_time: s.sms.schedule_time,
       oneshot_enabled: s.sms.oneshot_enabled ?? false,
       ad_optout: s.sms.ad_optout ?? '',
     },
@@ -124,9 +118,6 @@ function toSettings(v: FormValues, prev: SiteSettings): SiteSettings {
       sender_no: v.sms.sender_no.trim(),
       smtnt_id: v.sms.smtnt_id.trim(),
       smtnt_key: v.sms.smtntKeyNew.trim() || prev.sms.smtnt_key,
-      schedule_enabled: v.sms.schedule_enabled,
-      schedule_days_before: Number(v.sms.schedule_days_before) || 0,
-      schedule_time: v.sms.schedule_time,
       oneshot_enabled: v.sms.oneshot_enabled,
       ad_optout: v.sms.ad_optout.trim(),
     },
@@ -342,22 +333,11 @@ export function SiteSettingsPage() {
             광고성(마케팅) 문자 발송 시 본문에 (광고)와 함께 자동 표기됩니다. 비우면 미표기.
           </p>
         </FieldRow>
-        <FieldRow label="발송 스케줄" align="start">
-          <label className="mb-2 flex items-center gap-2 text-[13px] text-gray-700">
-            <input type="checkbox" {...register('sms.schedule_enabled')} /> 자동 발송 사용
-          </label>
-          <div className="flex flex-wrap items-center gap-2 text-[13px] text-gray-600">
-            추첨
-            <input
-              className={cn(inputCls, 'h-9 w-16 text-center')}
-              inputMode="numeric"
-              {...register('sms.schedule_days_before')}
-            />
-            일 전
-            <input type="time" className={cn(inputCls, 'h-9 w-[120px]')} {...register('sms.schedule_time')} />
-            발송
-          </div>
-          {errors.sms?.schedule_days_before && <p className={errCls}>{errors.sms.schedule_days_before.message}</p>}
+        <FieldRow label="추천번호 발송요일" align="start">
+          <p className="text-[12.5px] leading-relaxed text-gray-500">
+            회원별 발송요일은 <b>회원정보창</b>에서 지정하고, 매일 09:00 자동 발급/발송됩니다.
+            유료회원 조합 문자 자동발송은 <b>설정 &gt; 로또 고정·제외 &gt; 추천조합 발급 설정</b>에서 켭니다.
+          </p>
         </FieldRow>
       </SectionCard>
 

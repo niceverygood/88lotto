@@ -389,3 +389,8 @@
   - **본문(LMS)**: `[플러스로또] {이름}님 {회차}회 추천번호 {N}조합` + 조합목록 + 홈페이지 안내.
   - **UI**: 설정>로또 고정·제외 '추천조합 발급 설정' 카드에 토글 + 경고문(실발송 캐쉬 차감). `WeeklyFreeRecoSettings.paid_sms?` 추가. PAID_GRADES=gold/goldp/vip/royal(MEMBER_VIEWS 'paid' 정의), simple/free/ovr/toss는 발급만.
 - **영향**: 앱 빌드(3604모듈)·크론 단독 tsc 통과. 게이트 OFF(현 oneshot_enabled=False·paid_sms 미설정)라 배포해도 자동발송 없음 — 차장이 두 토글 ON + 유료회원 발송요일 설정부터 동작. **운영 주의**: paid_sms+실발송 ON 시 매일 09시 '오늘=발송요일'인 유료회원에게 자동 발송되므로 발송요일 설정한 유료회원 번호 정확성 확인 필수. **TODO**: ① 30조합 LMS 길이(현 ~600byte, 2000 한도 여유) ② mock '지금 발급'은 SMS 미연동(프로덕션 크론 전용; 수동 SMS는 D53 회원정보창) ③ SMS 실패 재시도 없음(발급 성공·SMS best-effort).
+
+### D62. 템플릿 문자 실발송 누락 수정 + '미발송' 라벨 + 죽은 '발송 스케줄' 제거 (현장 6/18)
+- **핵심 버그**: supabase 모드에서 `useSendSms`가 `supa.sendSms`만 호출했는데, `supa.sendSms`는 템플릿 문자(가입/추천/당첨/마케팅)를 status='발송완료'로 **기록만 하고 OneShot 을 호출하지 않음** → 운영에서 템플릿 문자가 실제로 안 나감(직접발송 `sendCustomSms`·수동조합 `manualIssueReco` 만 실발송됐음). mock 경로(api.ts)는 sendOneShot 호출했으나 supabase 경로 누락. 차장 6/18 "문자 발송내역 이상" 신고로 발견.
+- **수정**: ① `supa.sendSms` 에 실발송 게이트(`realSend = oneshot_enabled && sender_no`) + `sendOneShot` 호출 추가(sendCustomSms 동일 패턴), 마케팅 `(광고)`+무료거부 표기, `fetchSmsConfig` 에 `adOptout` 추가. ② **실발송 OFF면 status='미발송'**(기존 '발송완료' 오인 라벨 → 전 발송경로 supa·mock 일괄). ③ 죽은 '발송 스케줄' 카드(`schedule_*`, 동작 안 하던 잔재) 전면 제거 — `SmsSettings` 타입·zod·toForm·toSettings·UI·seed 6곳. UI 자리엔 '회원별 발송요일은 회원정보창' 안내로 교체.
+- **영향**: 앱 빌드(3604모듈) 통과. 발송 `send_phone`=설정 `sms.sender_no`(요청 우선). **검증**: 차장 재발송 시 실수신 + sms_sends 기록 일치 예정. **데이터 참고**: 과거 라이브 sms_sends 의 '발송완료' 중 실발송 OFF 시기 기록은 **실제 미발송분**일 수 있음(라벨만 발송완료였음). 테스트 회원 m_d42878d2(정의현/VIP) 담당=staff-rep1 → 팀장(rep) 계정으로 보면 RLS상 본인 담당만 보이므로, 발송내역 확인은 admin/관리자/실장 계정 권장.

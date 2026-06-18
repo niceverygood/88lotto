@@ -231,10 +231,7 @@ export interface SmsSettings {
   sender_no: string // 발신번호(OneShot send_phone/CALLBACK — 사전등록 필수)
   smtnt_id: string // OneShot 사용자 아이디(매뉴얼 id, 예: lotto_dream_api)
   smtnt_key: string // (미사용) OneShot 은 IP 화이트리스트 인증이라 API 키 없음 — 보존용
-  schedule_enabled: boolean
-  schedule_days_before: number // 추첨 N일 전 발송
-  schedule_time: string // HH:mm
-  oneshot_enabled: boolean // 실발송 사용(OneShot Edge Function 경유) §V2-6
+  oneshot_enabled: boolean // 실발송 사용(OneShot 경유) §V2-6
   ad_optout: string // 광고성 무료수신거부 번호(있으면 마케팅 문자에 (광고)+번호 자동표기)
 }
 
