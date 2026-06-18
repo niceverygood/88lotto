@@ -52,11 +52,13 @@ export function LottoExcludePage() {
   const [recoEnabled, setRecoEnabled] = useState(true)
   const [recoCount, setRecoCount] = useState('30')
   const [recoRatio, setRecoRatio] = useState('100') // 로직 적용 비율 %(현장 피드백)
+  const [recoPaidSms, setRecoPaidSms] = useState(false) // 유료 지정요일 조합 SMS 자동발송(현장 피드백 6/18)
   useEffect(() => {
     if (settings?.weekly_free_reco) {
       setRecoEnabled(settings.weekly_free_reco.enabled)
       setRecoCount(String(settings.weekly_free_reco.set_count))
       setRecoRatio(String(settings.weekly_free_reco.logic_ratio ?? 100))
+      setRecoPaidSms(!!settings.weekly_free_reco.paid_sms)
     }
   }, [settings])
 
@@ -135,6 +137,7 @@ export function LottoExcludePage() {
         enabled: recoEnabled,
         set_count: Math.max(1, Number(recoCount) || 30),
         logic_ratio: Math.max(0, Math.min(100, Number(recoRatio) || 0)),
+        paid_sms: recoPaidSms,
       },
     }
     await save.mutateAsync(next)
@@ -358,6 +361,21 @@ export function LottoExcludePage() {
             저장
           </Button>
         </div>
+        <label className="mt-3 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-[12.5px] text-gray-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={recoPaidSms}
+            onChange={(e) => setRecoPaidSms(e.target.checked)}
+          />
+          <span>
+            <b>유료회원 지정요일 조합 문자(SMS) 자동발송</b> — 골드·골드+·VIP·로얄 회원 중 회원정보창에 발송요일을 지정한
+            회원에게, 매일 09:00 그 요일이면 조합을 문자로 발송합니다. (무료회원은 발송 없이 홈페이지 발급만)
+            <span className="mt-0.5 block text-danger">
+              ⚠ 실제 발송되려면 [설정 &gt; 문자 설정]의 ‘실발송 사용’도 켜져 있어야 하며, OneShot 캐쉬가 차감됩니다.
+            </span>
+          </span>
+        </label>
         <p className="mt-2 text-[11.5px] text-gray-400">
           조합 수는 회원별 설정(회원정보창)이 우선, 없으면 기본값. 로직 비율 예) 10조합·70% → 로직 7 +
           완전랜덤 3. 발급 번호는 등급별 고정·제외 규칙(없으면 공통)을 적용해 생성됩니다.

@@ -285,6 +285,7 @@ export interface WeeklyFreeRecoSettings {
   enabled: boolean
   set_count: number // 발급 조합 수(기본 30) — 회원별 weekly_reco_count 가 우선
   logic_ratio?: number // 로직 적용 비율 %(기본 100) — 나머지는 완전랜덤 조합(현장 피드백)
+  paid_sms?: boolean // 유료회원(골드/골드+/VIP/로얄) 지정요일 조합 SMS 자동발송(현장 피드백 6/18). 실발송(oneshot)+발신번호도 필요.
 }
 
 // 회원에게 발급된 주간 추천 1회분(member.meta.weekly_recos[]). 홈페이지(전화/뒷4자리)에서 조회.

@@ -381,3 +381,11 @@
 - **검증(2026-06-18, 라이브)**: 재현 — `weekly_free_reco` 포함 PATCH=PGRST204 실패 / `sms` 단독 PATCH=성공. 적용 후 — 두 컬럼 존재 ✅ / **앱과 동일한 전체 update({...next}) HTTP 200** ✅ / 저장값 재조회 영속 ✅ / 원복.
 - **발신번호 흐름(실발송 테스트 가이드)**: 실발송 게이트 = `oneshot_enabled && sender_no`(둘 다 필요). 발송 `send_phone` = **설정 `sms.sender_no`(요청 body)가 env `ONESHOT_SEND_PHONE`(15226385)보다 우선**(`api/send-sms.ts:25`). 현재 라이브 발신번호=`1588-0000` → OneShot 미등록 번호면 `316 발신번호 미등록`으로 실패. **검증된 등록번호=`15226385`**.
 - **TODO(재발방지)**: `update({...next})` 는 SiteSettings 필드 추가 시마다 라이브 ALTER 누락에 취약(반복: `lotto_exclude_history`→M8, `weekly_free_reco`/`terms_by_grade`→이번). **새 설정필드 추가 시 마이그레이션 동반을 규칙화**하거나 supa.saveSiteSettings 를 화이트리스트 컬럼만 쓰도록 강화 검토.
+
+### D61. 유료회원 지정요일 조합 SMS 자동발송 (현장 피드백 6/18)
+- **결정**: 차장 확정("유료회원에게 지정 요일에 조합을 문자(SMS)로 자동발송", 익주 운영 예정). 크론(`api/weekly-reco.ts`)을 확장 — 유료등급(골드/골드+/VIP/로얄) 중 회원정보창에 발송요일(`meta.weekly_reco_day`)이 설정된 회원에게, 그 요일 09:00 발급 + **조합을 SMS 발송**. 무료회원은 기존대로 발급만(문자 X).
+  - **3중 안전 게이트**: `weekly_free_reco.paid_sms`(전용 토글, jsonb 하위필드라 마이그레이션 불요) && `sms.oneshot_enabled`(실발송 마스터) && `sms.sender_no`. 둘 다 ON이어야 실제 발송 → 실발송만 켜도 유료에 자동 안 나가게 분리(오발송 방지).
+  - **발송 경로**: 검증된 `/api/send-sms`(Fixie 프록시) 재사용 — 크론이 `fetch(selfBase+'/api/send-sms')` 로 1건씩(selfBase=SELF_BASE_URL‖VERCEL_URL‖plus-lotto.vercel.app). 멱등 — 신규 발급분만 발송(재실행 시 skippedRound→미발송). 발송분 `sms_sends` 기록(type=recommend).
+  - **본문(LMS)**: `[플러스로또] {이름}님 {회차}회 추천번호 {N}조합` + 조합목록 + 홈페이지 안내.
+  - **UI**: 설정>로또 고정·제외 '추천조합 발급 설정' 카드에 토글 + 경고문(실발송 캐쉬 차감). `WeeklyFreeRecoSettings.paid_sms?` 추가. PAID_GRADES=gold/goldp/vip/royal(MEMBER_VIEWS 'paid' 정의), simple/free/ovr/toss는 발급만.
+- **영향**: 앱 빌드(3604모듈)·크론 단독 tsc 통과. 게이트 OFF(현 oneshot_enabled=False·paid_sms 미설정)라 배포해도 자동발송 없음 — 차장이 두 토글 ON + 유료회원 발송요일 설정부터 동작. **운영 주의**: paid_sms+실발송 ON 시 매일 09시 '오늘=발송요일'인 유료회원에게 자동 발송되므로 발송요일 설정한 유료회원 번호 정확성 확인 필수. **TODO**: ① 30조합 LMS 길이(현 ~600byte, 2000 한도 여유) ② mock '지금 발급'은 SMS 미연동(프로덕션 크론 전용; 수동 SMS는 D53 회원정보창) ③ SMS 실패 재시도 없음(발급 성공·SMS best-effort).

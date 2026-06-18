@@ -37,7 +37,8 @@ interface WeeklyRecoIssue {
 interface SiteSettingsLite {
   lotto_exclude: LottoExcludeSettings
   lotto_exclude_history?: LottoExcludeRule[]
-  weekly_free_reco?: { enabled: boolean; set_count: number; logic_ratio?: number }
+  weekly_free_reco?: { enabled: boolean; set_count: number; logic_ratio?: number; paid_sms?: boolean }
+  sms?: { oneshot_enabled?: boolean; sender_no?: string }
 }
 
 const LOTTO_MIN = 1
@@ -488,6 +489,36 @@ export const EXCLUSION_RULE_LABEL: Record<ExclusionRuleKey, string> = {
 
 export const MODE_OPTIONS: ExclusionMode[] = [10, 15, 20]
 
+// ── 유료회원 지정요일 조합 SMS 자동발송(현장 피드백 6/18) ────────────────────────
+// 유료 등급(골드/골드+/VIP/로얄)만 대상. 무료는 발급만(문자 X).
+const PAID_GRADES = new Set(['gold', 'goldp', 'vip', 'royal'])
+
+/** 조합 목록 → SMS 본문(LMS). */
+function formatComboSms(name: string, round: number, sets: number[][]): string {
+  const lines = sets.map((s, i) => `${String(i + 1).padStart(2, '0')}. ${s.join(', ')}`)
+  return `[플러스로또] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
+}
+
+/** 검증된 발송 함수(/api/send-sms, Fixie 프록시 경유)를 재사용해 1건 발송. */
+async function sendComboSms(
+  base: string,
+  dest: string,
+  body: string,
+  sender: string,
+): Promise<{ ok: boolean; code?: string }> {
+  try {
+    const r = await fetch(`${base}/api/send-sms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dest_phone: dest, msg_body: body, send_phone: sender }),
+    })
+    const d = (await r.json()) as { ok?: boolean; code?: string }
+    return { ok: !!d.ok, code: d.code }
+  } catch {
+    return { ok: false, code: 'NET' }
+  }
+}
+
 // ── 크론 핸들러 ───────────────────────────────────────────────────────────────
 const DEFAULT_DAY = 5 // 금요일(0=일..6=토)
 const DEFAULT_COUNT = 30
@@ -519,6 +550,14 @@ export default async function handler(req: any, res: any) {
     const ratio = Math.max(0, Math.min(100, cfg.logic_ratio ?? 100)) // 로직:랜덤 비율(현장 피드백)
     if (!cfg.enabled && !force) return res.status(200).json({ ok: true, skipped: 'disabled' })
 
+    // 유료회원 지정요일 조합 SMS — 전용 토글(paid_sms) + 실발송(oneshot_enabled) + 발신번호 모두 충족 시만.
+    const smsCfg = settings.sms ?? {}
+    const paidSmsOn = !!smsCfg.oneshot_enabled && !!smsCfg.sender_no && !!cfg.paid_sms
+    const sender = smsCfg.sender_no ?? ''
+    const selfBase =
+      process.env.SELF_BASE_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://plus-lotto.vercel.app')
+
     // PostgREST 1000행 캡 회피 — range 페이지네이션으로 전 회차 조회.
     const rounds: LottoRound[] = []
     for (let from = 0; ; from += 1000) {
@@ -543,11 +582,17 @@ export default async function handler(req: any, res: any) {
 
     // 전 등급 조회 — 무료=기본 금요일, 그 외 등급=발송요일 설정된 회원만(6/11 피드백).
     // 대량(15만) 대비 range 페이지네이션.
-    const rows: { id: string; grade: string; meta: Record<string, unknown> | null }[] = []
+    const rows: {
+      id: string
+      grade: string
+      name: string | null
+      phone: string | null
+      meta: Record<string, unknown> | null
+    }[] = []
     for (let from = 0; ; from += 1000) {
       const { data: mData, error: me } = await sb
         .from('members')
-        .select('id, grade, meta')
+        .select('id, grade, name, phone, meta')
         .eq('is_deleted', false)
         .eq('is_withdrawn', false)
         .order('id')
@@ -561,6 +606,8 @@ export default async function handler(req: any, res: any) {
     let issued = 0
     let skippedRound = 0
     let skippedDay = 0
+    let smsSent = 0
+    let smsFail = 0
     for (const r of rows) {
       const meta = r.meta ?? {}
       const day =
@@ -608,6 +655,24 @@ export default async function handler(req: any, res: any) {
       const { error } = await sb.from('members').update({ meta: nextMeta }).eq('id', r.id)
       if (error) throw error
       issued++
+
+      // 유료회원(골드/골드+/VIP/로얄) 지정요일 조합 SMS 자동발송 — 신규 발급분만(멱등).
+      if (paidSmsOn && PAID_GRADES.has(r.grade) && r.phone) {
+        const smsBody = formatComboSms(r.name ?? '', targetRound, sets)
+        const sres = await sendComboSms(selfBase, r.phone, smsBody, sender)
+        await sb.from('sms_sends').insert({
+          id: `sms_cron_${Date.now().toString(36)}_${r.id.slice(-6)}`,
+          member_id: r.id,
+          template_key: null,
+          phone: r.phone,
+          body: smsBody,
+          type: 'recommend',
+          status: sres.ok ? '발송완료' : `실패(${sres.code ?? '?'})`,
+          sent_at: ts,
+        })
+        if (sres.ok) smsSent++
+        else smsFail++
+      }
     }
 
     await sb.from('logs').insert({
@@ -617,11 +682,11 @@ export default async function handler(req: any, res: any) {
       action: 'reco.weekly_issue',
       target_type: 'member',
       target_id: null,
-      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, round_no: targetRound, channel: 'cron', force },
+      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, round_no: targetRound, channel: 'cron', force, sms_sent: smsSent, sms_fail: smsFail },
       created_at: ts,
     })
 
-    return res.status(200).json({ ok: true, round_no: targetRound, issued, skippedRound, skippedDay })
+    return res.status(200).json({ ok: true, round_no: targetRound, issued, skippedRound, skippedDay, smsSent, smsFail })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return res.status(500).json({ ok: false, code: 'ERROR', message })
