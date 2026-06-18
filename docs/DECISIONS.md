@@ -374,3 +374,10 @@
   - **검증(3중)**: 공식↔smok95/lotto(262~1227) **966회 전수 일치** / 공식↔happylie(1~1204) 1070·1071 불일치 → 공식 단건 조회로 **happylie 스왑 오류 확정**(공식이 기준) / 전 회차 토요일 추첨·번호 유효성 전수 통과. 적재는 **공식 데이터만** 사용. 백업: `supabase/seed-data/lotto_rounds_1-1227.json`.
   - **버그 수정**: 적재 후 크론 target 이 1181로 나오는 회귀 발견 — **PostgREST 기본 1000행 캡**으로 `select('*')` 가 잘림. `lib/db/remote.selectAll` 을 range 페이지네이션으로 전환(로또기록·통계 등 fetchTables 전 소비처 해소), 발급 경로 3곳(lotto/supa·members/supa·크론)도 페이지네이션 적용(크론은 members 조회도 — 15만 대비).
 - **영향**: 라이브 1,227행(1회 10,23,29,33,37,40+16 ~ 1227회 1,14,16,34,41,44+13, 전회차 확정). 크론 재실행 → **1228회 208명 발급**(무료 207+금요일 유료 1, 멱등 재확인) · 포털 RPC 1228회 30조합 노출 ✓. 토(6/13) 1228 추첨 후 결과 등록하면 다음 발급 자동 1229. **TODO(live-verify)**: 1~261회 prize_1~3 은 공식 API 미제공 시기라 null 가능(표시 0원) — 통계·발급엔 무관.
+
+### D60. 문자 설정(및 전체 site_settings) 저장 실패 버그 — 라이브 누락 컬럼 추가 (0004)
+- **원인**: 라이브 `site_settings` 에 `weekly_free_reco`(D49)·`terms_by_grade`(D57) 컬럼이 ALTER 누락. `settings/supa.saveSiteSettings` 가 `update({ ...next })` 로 SiteSettings 전체를 쓰므로, 없는 컬럼에서 **PGRST204**("Could not find the 'weekly_free_reco' column ... in the schema cache") → 발신번호·실발송 포함 **모든 설정 저장이 통째로 실패**. (차장 6/18 "문자설정 저장이 안 된다" 신고로 발견)
+- **수정**: `supabase/migrations/0004_settings_missing_columns.sql` — 두 컬럼 `add column if not exists`(jsonb, 기본값).
+- **검증(2026-06-18, 라이브)**: 재현 — `weekly_free_reco` 포함 PATCH=PGRST204 실패 / `sms` 단독 PATCH=성공. 적용 후 — 두 컬럼 존재 ✅ / **앱과 동일한 전체 update({...next}) HTTP 200** ✅ / 저장값 재조회 영속 ✅ / 원복.
+- **발신번호 흐름(실발송 테스트 가이드)**: 실발송 게이트 = `oneshot_enabled && sender_no`(둘 다 필요). 발송 `send_phone` = **설정 `sms.sender_no`(요청 body)가 env `ONESHOT_SEND_PHONE`(15226385)보다 우선**(`api/send-sms.ts:25`). 현재 라이브 발신번호=`1588-0000` → OneShot 미등록 번호면 `316 발신번호 미등록`으로 실패. **검증된 등록번호=`15226385`**.
+- **TODO(재발방지)**: `update({...next})` 는 SiteSettings 필드 추가 시마다 라이브 ALTER 누락에 취약(반복: `lotto_exclude_history`→M8, `weekly_free_reco`/`terms_by_grade`→이번). **새 설정필드 추가 시 마이그레이션 동반을 규칙화**하거나 supa.saveSiteSettings 를 화이트리스트 컬럼만 쓰도록 강화 검토.
