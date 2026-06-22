@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
-  "crons": [{ "path": "/api/weekly-reco", "schedule": "0 0 * * *" }]
+  "crons": [
+    { "path": "/api/weekly-lotto-sync", "schedule": "0 23 * * *" },
+    { "path": "/api/weekly-reco", "schedule": "0 0 * * *" }
+  ]
 }
