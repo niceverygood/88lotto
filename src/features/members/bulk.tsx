@@ -13,6 +13,7 @@ import {
   useBulkUpdateMembers,
   useResetAssign,
   useResetMembers,
+  useSendCustomSms,
   useSendSms,
   useSmsTemplates,
 } from './api'
@@ -34,12 +35,17 @@ export function MemberBulkActions({
   clear: () => void
 }) {
   // 디비 배분/입력·담당자 변경·유입분류는 최고관리자만(현장 피드백)
-  const isAdmin = useRole() === 'admin'
+  const role = useRole()
+  const isAdmin = role === 'admin'
+  // 자유본문(직접입력) 일괄발송은 최고관리자·관리자만(현장 피드백 6/22, 오발송·스팸 위험)
+  const canDirectSms = role === 'admin' || role === 'manager'
   const [modal, setModal] = useState<BulkModal>(null)
   const [statusVal, setStatusVal] = useState<MemberStatus>('active')
   const [inflowVal, setInflowVal] = useState<string>(INFLOW_TYPES[0])
   const [staffVal, setStaffVal] = useState('')
   const [smsVal, setSmsVal] = useState('')
+  const [smsMode, setSmsMode] = useState<'template' | 'direct'>('template')
+  const [smsBody, setSmsBody] = useState('') // 직접입력 본문(일괄)
   const [autoPool, setAutoPool] = useState<string[]>([]) // 자동배분 실행 시 대상 풀(임시 가감)
 
   const { data: staff = [] } = useStaff()
@@ -51,6 +57,7 @@ export function MemberBulkActions({
   const reset = useResetAssign()
   const resetDb = useResetMembers()
   const sendSms = useSendSms()
+  const sendCustomSms = useSendCustomSms()
 
   const busy =
     bulkUpdate.isPending ||
@@ -58,7 +65,8 @@ export function MemberBulkActions({
     autoAssign.isPending ||
     reset.isPending ||
     resetDb.isPending ||
-    sendSms.isPending
+    sendSms.isPending ||
+    sendCustomSms.isPending
 
   const close = () => setModal(null)
   const done = () => {
@@ -70,6 +78,8 @@ export function MemberBulkActions({
 
   const openSms = () => {
     setSmsVal(templates[0]?.key ?? '')
+    setSmsMode('template')
+    setSmsBody('')
     setModal('sms')
   }
   const openAssign = () => {
@@ -235,24 +245,72 @@ export function MemberBulkActions({
             <Button
               variant="acc"
               size="sm"
-              disabled={busy || !smsVal}
-              onClick={() => sendSms.mutate({ ids: selectedIds, templateKey: smsVal }, { onSuccess: done })}
+              disabled={busy || (smsMode === 'template' ? !smsVal : !smsBody.trim())}
+              onClick={() => {
+                const onErr = (e: unknown) =>
+                  window.alert(e instanceof Error ? e.message : '문자 발송에 실패했습니다.')
+                if (smsMode === 'template')
+                  sendSms.mutate({ ids: selectedIds, templateKey: smsVal }, { onSuccess: done, onError: onErr })
+                else sendCustomSms.mutate({ ids: selectedIds, body: smsBody }, { onSuccess: done, onError: onErr })
+              }}
             >
               발송
             </Button>
           </>
         }
       >
-        <label className="mb-1.5 block text-[12px] font-semibold text-gray-600">템플릿</label>
-        <select className={selectCls} value={smsVal} onChange={(e) => setSmsVal(e.target.value)}>
-          {templates.map((t) => (
-            <option key={t.key} value={t.key}>
-              {t.title}
-            </option>
-          ))}
-        </select>
+        {canDirectSms && (
+          <div className="mb-2.5 flex gap-1 rounded-md bg-gray-100 p-0.5 text-[12.5px]">
+            <button
+              type="button"
+              className={
+                'flex-1 rounded px-2 py-1 ' +
+                (smsMode === 'template' ? 'bg-white font-semibold text-gray-800 shadow-sm' : 'text-gray-500')
+              }
+              onClick={() => setSmsMode('template')}
+            >
+              템플릿
+            </button>
+            <button
+              type="button"
+              className={
+                'flex-1 rounded px-2 py-1 ' +
+                (smsMode === 'direct' ? 'bg-white font-semibold text-gray-800 shadow-sm' : 'text-gray-500')
+              }
+              onClick={() => setSmsMode('direct')}
+            >
+              직접입력
+            </button>
+          </div>
+        )}
+        {smsMode === 'template' ? (
+          <>
+            <label className="mb-1.5 block text-[12px] font-semibold text-gray-600">템플릿</label>
+            <select className={selectCls} value={smsVal} onChange={(e) => setSmsVal(e.target.value)}>
+              {templates.map((t) => (
+                <option key={t.key} value={t.key}>
+                  {t.title}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <>
+            <label className="mb-1.5 block text-[12px] font-semibold text-gray-600">직접 입력</label>
+            <textarea
+              value={smsBody}
+              onChange={(e) => setSmsBody(e.target.value)}
+              rows={4}
+              placeholder="발송할 문자 내용을 직접 입력하세요."
+              className="w-full rounded-md border border-gray-300 p-2 text-[12.5px] text-gray-700 outline-none focus:border-primary-500"
+            />
+            <div className="mt-1 text-right font-mono text-[10.5px] tnum text-gray-400">
+              {new Blob([smsBody]).size}byte · {new Blob([smsBody]).size > 90 ? 'LMS' : 'SMS'}
+            </div>
+          </>
+        )}
         <p className="mt-2 text-[11.5px] text-gray-400">
-          선택한 회원에게 발송 이력이 생성되고 회원 상세 문자내역에 반영됩니다.
+          선택한 {n}명에게 발송 이력이 생성되고 회원 상세 문자내역에 반영됩니다.
         </p>
       </Modal>
 

@@ -8,7 +8,7 @@ import { dataSource } from '@/lib/supabase'
 import { staffById, staffRoleById, assignableReps } from '@/lib/staff'
 import { useCurrentUser, type CurrentUser } from '@/lib/auth'
 import { memberKeys, paymentKeys, revenueKeys, smsTemplateKeys } from '@/lib/queryKeys'
-import { renderSms, smsTypeForTemplate } from '@/lib/sms'
+import { recoSmsBody, renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
 import { resolveExcludeForGrade } from '@/lib/lotto'
 import { generateIssueSets } from '@/lib/lottoGenerator'
@@ -917,10 +917,36 @@ export function useSendSms() {
       const targets = cur.members.filter((m) => v.ids.includes(m.id))
       const ts = nowIso()
 
+      // 추천번호 템플릿: 조합발송과 동일 본문(실 발급조합). 발급분 없으면 즉석 발급 후 meta 적재(현장 피드백 6/22).
+      const isReco = v.templateKey === 'recommend'
+      const recoTarget = isReco ? cur.lotto_rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1 : 0
+      const freshIssues: Record<string, WeeklyRecoIssue> = {}
+
       const records: SmsSend[] = []
       for (const m of targets) {
-        let body = tpl ? renderSms(tpl.body, m) : ''
-        if (type === 'marketing' && sms?.ad_optout) body = `(광고)${body}\n무료거부 ${sms.ad_optout}`
+        let body: string
+        if (isReco) {
+          const recos = Array.isArray(m.meta?.weekly_recos) ? (m.meta!.weekly_recos as WeeklyRecoIssue[]) : []
+          let issue = recos.find((r) => r.round_no === recoTarget) ?? null
+          if (!issue) {
+            const exclude = resolveExcludeForGrade(cur.site_settings, m.grade)
+            const ratio = cur.site_settings.weekly_free_reco?.logic_ratio ?? 100
+            const cnt =
+              typeof m.meta?.weekly_reco_count === 'number' && (m.meta.weekly_reco_count as number) > 0
+                ? (m.meta.weekly_reco_count as number)
+                : (cur.site_settings.weekly_free_reco?.set_count ?? 30)
+            issue = {
+              round_no: recoTarget,
+              issued_at: ts,
+              sets: generateIssueSets(cur.lotto_rounds, exclude, Math.max(1, cnt), ratio),
+            }
+            freshIssues[m.id] = issue
+          }
+          body = recoSmsBody(issue.round_no, issue.sets)
+        } else {
+          body = tpl ? renderSms(tpl.body, m) : ''
+          if (type === 'marketing' && sms?.ad_optout) body = `(광고)${body}\n무료거부 ${sms.ad_optout}`
+        }
         let status = '미발송'
         if (realSend) {
           const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sms.sender_no })
@@ -938,6 +964,12 @@ export function useSendSms() {
         })
       }
       mutateDb((db) => {
+        for (const [mid, issue] of Object.entries(freshIssues)) {
+          const m = db.members.find((x) => x.id === mid)
+          if (!m) continue
+          const recos = Array.isArray(m.meta?.weekly_recos) ? (m.meta!.weekly_recos as WeeklyRecoIssue[]) : []
+          m.meta = { ...m.meta, weekly_recos: [issue, ...recos].slice(0, 8) }
+        }
         for (const rec of records) db.sms_sends.push(rec)
         db.logs.push({
           id: genId('log'),
@@ -1026,11 +1058,6 @@ export interface ManualIssueInput {
   alsoSms: boolean // true 면 조합 본문을 문자로도 발송
 }
 
-function recoSmsBody(roundNo: number, sets: number[][]): string {
-  const lines = sets.map((s, i) => `${i + 1}) ${s.join(' ')}`)
-  return `[플러스로또] ${roundNo}회 추천번호 ${sets.length}조합\n${lines.join('\n')}`
-}
-
 export function useManualIssueReco() {
   const user = useCurrentUser()
   const qc = useQueryClient()
@@ -1055,7 +1082,7 @@ export function useManualIssueReco() {
       const realSend = !!sms?.oneshot_enabled && !!sms.sender_no
       let smsStatus: string | null = null
       if (v.alsoSms) {
-        smsStatus = '발송완료'
+        smsStatus = '미발송'
         if (realSend) {
           const r = await sendOneShot({
             dest_phone: member.phone,

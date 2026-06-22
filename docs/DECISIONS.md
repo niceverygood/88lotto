@@ -400,3 +400,10 @@
 - **라이브 재현(2026-06-18, rep01)**: `type='direct'` INSERT=22P02 / `type='join'`=201. 전체 96건 distinct type=['join','recommend'](direct 0건). 부차 가설 기각: sms_sends 조회/RLS 정상(rep 본인담당 21건 정확), logs insert도 rep01 201 정상.
 - **수정**: ① `supabase/migrations/0005_sms_type_direct.sql` — `alter type sms_type add value if not exists 'direct'`(SQL Editor 단독 실행). ② `pushLog` best-effort(throw→console.warn) — 감사로그 실패가 발송/캐시무효화를 막지 않게. ③ MemberDrawer 템플릿·직접 발송 버튼 onError(window.alert)로 silent 실패 가시화.
 - **영향**: enum 추가 후 직접발송 insert 201 통과 → 드로어 문자내역·MySmsPage 즉시 노출. 앱 빌드 통과. **검증 예정**: enum SQL 실행 후 직접발송 1건 → sms_sends 적재 + 화면 노출 확인.
+
+### D64. 현장 피드백 6/22 — 고정/제외 수정·삭제 + 추천발송 본문 통일 + 일괄 직접입력
+- **항목2 (고정수/제외수 수정·삭제)**: `LottoExcludePage.tsx` 이력 테이블 각 행에 **수정/삭제** 버튼 + 삭제 `ConfirmModal`(§10) + 편집 폼 로드(editingId)·`recalcSnapshot`(공통 활성규칙 스냅샷 재계산). 데이터계층 무변경 — `useSaveSiteSettings`가 history 배열 통째 저장(mock+supa 자동 반영). `resolveExcludeForGrade`가 history 직접 읽어 삭제/수정 즉시 추천에 반영.
+- **항목3 (추천번호 발송 내용/이력 통일)**: recommend 템플릿 발송 본문을 회원정보창 조합발송과 **동일 포맷**으로 통일. `lib/sms.recoSmsBody(round,sets)` 공유 함수 신설(기존 supa 인라인·api 로컬 중복 제거). `sendSms`(supa+mock)가 templateKey='recommend'일 때 회원의 발급조합(meta.weekly_recos 최신 회차분 재사용, 없으면 generateIssueSets 즉석 발급+meta 적재)으로 recoSmsBody 본문 생성 → type='recommend'·template_key='recommend' 동일 이력. 즉석 발급수=회원별 weekly_reco_count 우선, 없으면 weekly_free_reco.set_count(기본 30).
+- **항목4 (이용자 일괄발송 직접입력)**: `bulk.tsx` 문자발송 모달에 **템플릿/직접입력 탭** 추가. 직접입력은 **최고관리자·관리자만**(현장 확정, 자유본문 대량발송 오발송·스팸 위험). useSendCustomSms(ids[] 다건 기지원) 호출 + onError 알림 + 바이트/SMS·LMS 카운터. 데이터계층 무변경.
+- **항목1 (수동조합 발송 회차 오류)**: 코드 아닌 **데이터 밀림** — lotto_rounds 최신=1227(6/6)에 정지, target=max+1=1228이 이미 지난 회차. **운영자가 1228·1229 회차등록(즉시 해소)** + **주간 자동적재 크론(별도 구현)** 으로 결정(대표 승인). 본 커밋엔 항목1 코드변경 없음.
+- **영향**: 앱 빌드(3604모듈) 통과. mock 라벨 '발송완료'→'미발송'(직접발송·수동조합 일관, D62 연장). 발송 onError 알림은 일괄에도 적용.

@@ -7,7 +7,7 @@ import { type SupabaseClient } from '@supabase/supabase-js'
 import type { Assignment, LottoRound, Member, MemberStatus, Payment, Product, Role, SiteSettings, SmsSend, SmsTemplate, WeeklyRecoIssue } from '@/types/db'
 import { supabase } from '@/lib/supabase'
 import { genId, nowIso } from '@/lib/db/store'
-import { renderSms, smsTypeForTemplate } from '@/lib/sms'
+import { recoSmsBody, renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
 import { selectAll } from '@/lib/db/remote'
 import { resolveExcludeForGrade } from '@/lib/lotto'
@@ -527,10 +527,43 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
   const { realSend, sender_no, adOptout } = await fetchSmsConfig()
   const ts = nowIso()
   const type = smsTypeForTemplate(templateKey)
+
+  // 추천번호 템플릿 발송: 회원정보창 조합발송과 '동일 본문'(실제 발급조합)으로 통일(현장 피드백 6/22).
+  // 회원에게 대상 회차 발급분이 없으면 즉석 발급 후 meta 적재(홈페이지 조회분과 일치).
+  const isReco = templateKey === 'recommend'
+  let recoRounds: LottoRound[] = []
+  let recoSettings: SiteSettings | null = null
+  let recoTarget = 0
+  if (isReco) {
+    recoRounds = await selectAll<LottoRound>('lotto_rounds')
+    const { data: sData } = await sb().from('site_settings').select('*').eq('id', 1).maybeSingle()
+    recoSettings = sData as SiteSettings
+    recoTarget = recoRounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
+  }
+
   const rows: SmsSend[] = []
   for (const m of members) {
-    let body = tpl ? renderSms(tpl.body, m) : ''
-    if (type === 'marketing' && adOptout) body = `(광고)${body}\n무료거부 ${adOptout}`
+    let body: string
+    if (isReco && recoSettings) {
+      const recos = Array.isArray(m.meta.weekly_recos) ? (m.meta.weekly_recos as WeeklyRecoIssue[]) : []
+      let issue = recos.find((r) => r.round_no === recoTarget) ?? null
+      if (!issue) {
+        const exclude = resolveExcludeForGrade(recoSettings, m.grade)
+        const ratio = recoSettings.weekly_free_reco?.logic_ratio ?? 100
+        const cnt =
+          typeof m.meta.weekly_reco_count === 'number' && (m.meta.weekly_reco_count as number) > 0
+            ? (m.meta.weekly_reco_count as number)
+            : (recoSettings.weekly_free_reco?.set_count ?? 30)
+        const sets = generateIssueSets(recoRounds, exclude, Math.max(1, cnt), ratio)
+        issue = { round_no: recoTarget, issued_at: ts, sets }
+        const meta = { ...m.meta, weekly_recos: [issue, ...recos].slice(0, 8) }
+        await sb().from('members').update({ meta }).eq('id', m.id)
+      }
+      body = recoSmsBody(issue.round_no, issue.sets)
+    } else {
+      body = tpl ? renderSms(tpl.body, m) : ''
+      if (type === 'marketing' && adOptout) body = `(광고)${body}\n무료거부 ${adOptout}`
+    }
     // 실발송(oneshot_enabled+발신번호) 시 OneShot 호출 — 미설정이면 '미발송'으로 기록만.
     let status = '미발송'
     if (realSend) {
@@ -618,8 +651,7 @@ export async function manualIssueReco(
   if (ue) throw ue
 
   if (v.alsoSms) {
-    const lines = res.sets.map((s, i) => `${i + 1}) ${s.join(' ')}`)
-    const body = `[플러스로또] ${targetRound}회 추천번호 ${res.sets.length}조합\n${lines.join('\n')}`
+    const body = recoSmsBody(targetRound, res.sets)
     const { realSend, sender_no } = await fetchSmsConfig()
     let status = '미발송'
     if (realSend) {

@@ -2,7 +2,7 @@
 // 토요일 입력 → 익주 월요일(effective_from)부터 적용. 활성 규칙은 추천 생성(useLottoExclude)에 반영.
 import { useEffect, useMemo, useState } from 'react'
 import type { Grade, LottoExcludeRule, SiteSettings } from '@/types/db'
-import { Button } from '@/design-system/components'
+import { Button, ConfirmModal } from '@/design-system/components'
 import { usePageMeta } from '@/app/uiStore'
 import { datetime } from '@/lib/format'
 import { genId } from '@/lib/db/store'
@@ -47,6 +47,8 @@ export function LottoExcludePage() {
   const [roundNo, setRoundNo] = useState('')
   const [grade, setGrade] = useState<Grade | null>(null)
   const [effectiveFrom, setEffectiveFrom] = useState(nextMonday())
+  const [editingId, setEditingId] = useState<string | null>(null) // 이력 수정 중인 규칙 id(현장 피드백 6/22)
+  const [deleteId, setDeleteId] = useState<string | null>(null) // 삭제 확인 대상
 
   // 무료회원 주간 발급 설정(현장 피드백)
   const [recoEnabled, setRecoEnabled] = useState(true)
@@ -101,32 +103,81 @@ export function LottoExcludePage() {
 
   const canAdd = !!settings && /^\d+$/.test(roundNo) && (fixed.length > 0 || excluded.length > 0)
 
-  async function onAddRule() {
-    if (!settings || !canAdd) return
-    const rule: LottoExcludeRule = {
-      id: genId('lxr'),
-      round_no: Number(roundNo),
-      grade,
-      fixed: [...fixed],
-      excluded: [...excluded],
-      effective_from: effectiveFrom,
-      created_at: new Date().toISOString(),
-      created_by: me?.id ?? null,
-    }
-    const nextHistory = [...(settings.lotto_exclude_history ?? []), rule]
-    // 레거시 스냅샷(폴백) = 공통(grade=null) 활성 규칙 중 최신. 없으면 기존 유지.
-    const commonActive = nextHistory
+  // 레거시 스냅샷(폴백) 재계산 = 공통(grade=null) 활성 규칙 중 최신. 추가/수정/삭제 후 동기화.
+  function recalcSnapshot(hist: LottoExcludeRule[]) {
+    const commonActive = hist
       .filter((r) => (r.grade ?? null) === null && r.effective_from <= today)
       .sort((a, b) => b.effective_from.localeCompare(a.effective_from))
-    const snapshot = commonActive[0]
+    return commonActive[0]
       ? { fixed: commonActive[0].fixed, excluded: commonActive[0].excluded }
-      : settings.lotto_exclude
-    const next: SiteSettings = { ...settings, lotto_exclude_history: nextHistory, lotto_exclude: snapshot }
-    await save.mutateAsync(next)
+      : (settings?.lotto_exclude ?? { fixed: [], excluded: [] })
+  }
+
+  function resetRuleForm() {
+    setEditingId(null)
     setFixed([])
     setExcluded([])
-    setRoundNo(String(rule.round_no + 1))
+    setGrade(null)
+  }
+
+  // 이력에 추가(신규) 또는 수정 저장(editingId 분기).
+  async function onAddRule() {
+    if (!settings || !canAdd) return
+    let nextHistory: LottoExcludeRule[]
+    if (editingId) {
+      nextHistory = (settings.lotto_exclude_history ?? []).map((r) =>
+        r.id === editingId
+          ? { ...r, round_no: Number(roundNo), grade, fixed: [...fixed], excluded: [...excluded], effective_from: effectiveFrom }
+          : r,
+      )
+    } else {
+      const rule: LottoExcludeRule = {
+        id: genId('lxr'),
+        round_no: Number(roundNo),
+        grade,
+        fixed: [...fixed],
+        excluded: [...excluded],
+        effective_from: effectiveFrom,
+        created_at: new Date().toISOString(),
+        created_by: me?.id ?? null,
+      }
+      nextHistory = [...(settings.lotto_exclude_history ?? []), rule]
+    }
+    const next: SiteSettings = {
+      ...settings,
+      lotto_exclude_history: nextHistory,
+      lotto_exclude: recalcSnapshot(nextHistory),
+    }
+    await save.mutateAsync(next)
+    const wasEditing = editingId
+    resetRuleForm()
+    setRoundNo(wasEditing ? '' : String(Number(roundNo) + 1))
     setEffectiveFrom(nextMonday())
+  }
+
+  // 이력 행 수정 — 규칙을 입력 폼에 로드.
+  function onEditRule(r: LottoExcludeRule) {
+    setEditingId(r.id)
+    setGrade(r.grade)
+    setRoundNo(String(r.round_no))
+    setEffectiveFrom(r.effective_from)
+    setFixed([...r.fixed])
+    setExcluded([...r.excluded])
+    setMode('fixed')
+  }
+
+  // 이력 행 삭제(확인 후) — history 에서 제거 + 스냅샷 재계산.
+  async function onDeleteRule(id: string) {
+    if (!settings) return
+    const nextHistory = (settings.lotto_exclude_history ?? []).filter((r) => r.id !== id)
+    const next: SiteSettings = {
+      ...settings,
+      lotto_exclude_history: nextHistory,
+      lotto_exclude: recalcSnapshot(nextHistory),
+    }
+    await save.mutateAsync(next)
+    setDeleteId(null)
+    if (editingId === id) resetRuleForm()
   }
 
   async function onSaveReco() {
@@ -258,9 +309,14 @@ export function LottoExcludePage() {
           })}
         </div>
 
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex justify-end gap-2">
+          {editingId && (
+            <Button variant="sec" size="sm" disabled={save.isPending} onClick={resetRuleForm}>
+              편집 취소
+            </Button>
+          )}
           <Button variant="pri" size="sm" disabled={!canAdd || save.isPending} onClick={onAddRule}>
-            이력에 추가
+            {editingId ? '수정 저장' : '이력에 추가'}
           </Button>
         </div>
       </SectionCard>
@@ -283,6 +339,7 @@ export function LottoExcludePage() {
                   <th className="px-2.5 py-2">고정수</th>
                   <th className="px-2.5 py-2">제외수</th>
                   <th className="px-2.5 py-2 text-right">등록</th>
+                  <th className="px-2.5 py-2 text-right">관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -320,6 +377,22 @@ export function LottoExcludePage() {
                         {r.excluded.length ? r.excluded.join(', ') : '—'}
                       </td>
                       <td className="px-2.5 py-2 text-right text-[11px] text-gray-400">{datetime(r.created_at)}</td>
+                      <td className="whitespace-nowrap px-2.5 py-2 text-right">
+                        <button
+                          type="button"
+                          className="mr-2 text-[11.5px] font-semibold text-primary-600 hover:underline"
+                          onClick={() => onEditRule(r)}
+                        >
+                          수정
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[11.5px] font-semibold text-danger hover:underline"
+                          onClick={() => setDeleteId(r.id)}
+                        >
+                          삭제
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
@@ -381,6 +454,17 @@ export function LottoExcludePage() {
           완전랜덤 3. 발급 번호는 등급별 고정·제외 규칙(없으면 공통)을 적용해 생성됩니다.
         </p>
       </SectionCard>
+
+      <ConfirmModal
+        open={deleteId != null}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && onDeleteRule(deleteId)}
+        title="고정·제외 규칙 삭제"
+        description="이 회차 고정·제외 규칙을 삭제합니다. ‘적용중’ 규칙이면 추천 생성에서 즉시 제외됩니다. 되돌릴 수 없습니다."
+        confirmText="삭제"
+        tone="danger"
+        loading={save.isPending}
+      />
     </div>
   )
 }
