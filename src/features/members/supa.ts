@@ -360,6 +360,39 @@ export async function updateMemberMeta(
   await pushLog({ kind: 'admin', actor, action: 'member.settings_update', target_type: 'member', target_id: id, meta: { patch } })
 }
 
+/** 선택 회원 meta(발송요일/갯수 등) 일괄 병합 갱신(§자동조합 일괄). jsonb 병합이라 회원별 개별 update. */
+export async function bulkUpdateMemberMeta(
+  ids: string[],
+  patch: Record<string, unknown>,
+  actor: string | null,
+): Promise<void> {
+  // 선택은 pageSize(≤1000) 한도라 .in(ids) 결과도 ≤1000(캡 경계 내) — 추가 페이지네이션 불필요.
+  const { data, error: se } = await sb().from('members').select('id, meta').in('id', ids)
+  if (se) throw se
+  const rows = (data ?? []) as { id: string; meta: Record<string, unknown> | null }[]
+  // 25건씩 병렬 — 100건 기준 round-trip 체감 최소화.
+  const CHUNK = 25
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    await Promise.all(
+      rows.slice(i, i + CHUNK).map((r) => {
+        const next = { ...(r.meta ?? {}) }
+        for (const [k, val] of Object.entries(patch)) {
+          if (val === null || val === undefined || val === '') delete next[k]
+          else next[k] = val
+        }
+        return sb()
+          .from('members')
+          .update({ meta: next })
+          .eq('id', r.id)
+          .then(({ error }) => {
+            if (error) throw error
+          })
+      }),
+    )
+  }
+  await pushLog({ kind: 'admin', actor, action: 'member.bulk_settings_update', target_type: 'member', target_id: null, meta: { count: rows.length, patch } })
+}
+
 /** 결제 요청 → 대기(wait) 결제 1건 생성. */
 export async function requestPayment(
   v: { memberId: string; productId: string; amount: number; method: string; depositorName?: string | null },

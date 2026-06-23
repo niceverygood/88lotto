@@ -444,3 +444,11 @@
 - **수정**: ① `remote.ts` 에 range 페이지네이션 코어 `paginateAll<T>(build)` 추출(기존 `selectAll` 도 이걸 사용하도록 리팩터, 동작 동일). ② `fetchScopedMembers` → `selectAll<Member>('members')` 로 교체(전량 적재). ③ `fetchMineMembers`(나의고객) → `paginateAll` + `eq(assigned_staff_id)` 로 전량. ④ 같은 캡에 노출된 회원 테이블 무한정 read 동반 수정: `fetchInflowCodes`(유입코드 드롭다운 누락 방지), `createMember`·`bulkImportMembers` 의 **중복검사·user_id 채번**(`select('phone,user_id')` — 캡 너머 회원과 전화중복을 못 잡아 **15만 실데이터 임포트 시 중복 유입** → range 전량으로 차단). 안전상한 50만행.
 - **검증(2026-06-23, 라이브)**: service_role·인증 admin01 양쪽에서 단건 select=1000행 vs range 페이지네이션=**1,985행 전량**(2페이지: 1000+985) 일치 확인. 빌드(3604모듈)·tsc 통과.
 - **영향**: 이제 전체 회원이 목록/세그먼트/일괄작업에 노출 → 100건 전체선택·담당배정이 100건 전부 반영. **후속과제(별건, 미이행)**: (a) 수만~15만 규모에선 전량 클라 적재가 무거움 → server-side 필터/정렬/페이지네이션+COUNT 이관 필요(remote.ts:5 기존 TODO). (b) `lotto/supa` bets(round별)·`fetchMineSmsLog` 등 잔여 무한정 read 는 현 볼륨 안전, 동일 패턴으로 추후 정리. (c) 페이지크기 1000 + `.in(1000 ids)` 일괄작업 시 URL 길이·업데이트 캡 — 청크 분할 검토.
+
+### D70. 일괄 등급변경 + 일괄 자동조합(발송요일·갯수) 액션 (현장 피드백 6/23, 정의현 차장)
+- **요청**: 김형준 담당으로 배정한 100명을 ① 모두 골드플러스 등급으로 일괄적용 ② 익일 오전 자동조합 받게 설정 ③ 조합발송수=10. 기존엔 등급 일괄변경 UI 가 없었고(상태/유입분류만), 자동조합 발송요일·갯수는 회원정보창(MemberDrawer)에서 1명씩만 가능했음.
+- **구현(일괄작업바 MemberBulkActions, 최고관리자 전용 블록)**: ② 신규 액션 2종.
+  - **등급변경**: `useBulkUpdateMembers({ patch: { grade } })` 재사용(supa 는 `.update({...patch}).in(ids)` 라 grade 그대로 반영, D55 트리거는 담당/팀 변경에만 발동→등급은 무관). 8등급 드롭다운(GRADE_LABEL).
+  - **자동조합**: 신규 `useBulkUpdateMemberSettings` → `supa.bulkUpdateMemberMeta(ids, patch)` — 선택 회원 meta 를 25건씩 병렬로 `weekly_reco_day`(0=일..6=토, ''=전역기본 금)·`weekly_reco_count` 병합 갱신(jsonb 병합이라 회원별 개별 update). 발송요일+갯수 모달.
+- **연동(기존 크론 그대로)**: `api/weekly-reco.ts` 가 매일 09:00 KST, `meta.weekly_reco_day===오늘요일`인 회원에게 `meta.weekly_reco_count`(없으면 전역 set_count)개 조합 발급→`meta.weekly_recos[]`(홈페이지 조회). PAID_GRADES=gold/goldp/vip/royal 는 발송요일 지정 회원만 대상. 라이브 `weekly_free_reco.enabled=true`라 유료회원도 발급됨. (SMS 자동발송은 `weekly_free_reco.paid_sms` 토글 별도 — 현재 OFF 라 홈페이지 발급만, 문자는 안 나감.)
+- **검증(2026-06-23, 라이브)**: 빌드(3604모듈) 통과. 회원 1명 캡처→`grade=goldp`+`meta.weekly_reco_day=2/count=10` 적용→정확 반영 확인→원복 정상(되돌릴 1명만 사용, 100명 실데이터는 미변경). **실행 주체**: 100명 적용은 운영자가 UI 에서(김형준 담당 필터→전체선택→등급변경 골드플러스→자동조합 요일·10조합). 익일 오전 발급되려면 내일 09:00 KST 전에 '내일 요일'로 설정 필요.

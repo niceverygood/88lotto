@@ -460,6 +460,40 @@ export function useUpdateMemberSettings() {
   })
 }
 
+/** 회원별 발송 설정(조합발송요일/갯수 등 meta)을 선택 회원에 일괄 적용(§자동조합 일괄). */
+export function useBulkUpdateMemberSettings() {
+  const user = useCurrentUser()
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { ids: string[]; patch: MemberSettingsPatch }) => {
+      if (dataSource === 'supabase') {
+        await supa.bulkUpdateMemberMeta(v.ids, v.patch as Record<string, unknown>, user?.id ?? null)
+        return v.ids
+      }
+      mutateDb((db) => {
+        for (const m of db.members) {
+          if (!v.ids.includes(m.id)) continue
+          const meta = { ...m.meta }
+          for (const [k, val] of Object.entries(v.patch)) {
+            if (val === null || val === undefined || val === '') delete meta[k]
+            else meta[k] = val
+          }
+          m.meta = meta
+        }
+        db.logs.push(
+          adminLog(user?.id ?? null, 'member.bulk_settings_update', null, {
+            count: v.ids.length,
+            ids: v.ids,
+            patch: v.patch,
+          }),
+        )
+      })
+      return v.ids
+    },
+    onSuccess: (ids) => invalidate(ids),
+  })
+}
+
 // ── 결제 요청(현장 피드백): 담당이 본인 회원 결제를 '대기'로 올림 → 관리자 승인 ──────────
 export interface RequestPaymentInput {
   memberId: string
