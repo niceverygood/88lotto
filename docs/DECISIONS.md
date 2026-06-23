@@ -437,3 +437,13 @@
 - **🟢 low (문서화·코드무변경)**: ⑩ 크론 formatComboSms 본문이 recoSmsBody 와 다른 건 **의도된 차이**(자동발송은 이름+홈페이지 안내 포함, src import 불가한 Vercel 함수 제약) → 통일대상서 제외 명시. ⑮ 고정/제외 이력 동시편집 last-write-wins 는 소규모팀·주간 저빈도 admin 작업이라 **수용**(근본해결=서버 jsonb append RPC, 후속과제).
 - **#1 레포↔라이브 스키마 드리프트**: `members.consult_status` 는 라이브엔 존재(수기 추가, 동작 중)하나 마이그레이션 누락 → `0006_members_consult_status.sql`(멱등 add column if not exists)로 동기화. 라이브 적용은 no-op(이미 존재). **재발방지 일반화 미이행**: updateMember/bulkUpdateMembers 의 `.update({...patch})` 화이트리스트, 타입↔마이그레이션 CI 점검은 후속과제.
 - **영향**: 앱 빌드(3604모듈)·함수 단독 tsc 통과. 배포·라이브 보안검증 완료. data-layer-integrity 차원은 confirmed 0(이중모드 분기 견고). **후속과제(별건)**: send-sms per-mode 역할 서버강제, settings/members 화이트리스트 일반화, 동시편집 RPC, bulk getUser 호출 N회 레이턴시(저volume 내부툴이라 수용).
+
+### D69. 이용자 일괄작업 확장 — 등급 일괄변경 + 조합발송 설정 일괄 (현장 피드백 6/23)
+- **배경(현장 요청)**: "김형준 담당 100명에게 골드플러스 등급 일괄적용 + 익일 오전 자동조합(10조합) 설정" 요청이 들어왔으나, 일괄작업 바에 **등급 일괄변경**도 **조합발송요일/갯수 일괄설정**도 없었음 — 등급은 회원정보창에서 1명씩(100회), 조합발송요일·갯수도 회원정보창에서 1명씩만 가능했음. 100명 단위 운영이 불가능한 구조.
+- **수정**: `features/members/bulk.tsx` 에 최고관리자 전용 일괄 액션 2종 추가.
+  - **등급변경**: 선택 회원의 `grade` 를 일괄 패치(기본값 goldp). 기존 `useBulkUpdateMembers`(백엔드는 grade 패치 이미 지원) 재사용 — UI만 신설. 유료등급 상향은 매출 귀속·자동조합 대상에 영향 → 모달에 주의문구.
+  - **조합발송**: 선택 회원의 `meta.weekly_reco_day`(0=일..6=토)·`weekly_reco_count` 일괄 설정. jsonb 는 회원마다 내용이 달라 일괄 `update({meta})` 로 덮으면 타 키 유실 → 신설 `supa.bulkUpdateMemberMeta` 가 **회원별 fetch→병합→update** 로 보존. mock 경로는 `useBulkUpdateMemberSettings` 가 db.members 순회 병합.
+- **'익일 오전' 처리(설계 결정/한계)**: 크론 `weekly-reco.ts` 는 **요일 기반 매주 반복** 발급(매일 09:00 KST, 회원 weekly_reco_day 일치 시 발급)만 지원. '특정 1회만 발급'(one-shot) 메커니즘은 없음. → 운영은 발송요일을 **내일 요일**로 지정(매주 그 요일 반복). 모달에 이 동작/한계를 명시. one-shot 발급이 필요하면 후속과제.
+- **SMS 발송까지**: 유료등급(골드/골드+/VIP/로얄)은 기존 크론이 `weekly_free_reco.paid_sms` 토글 + `sms.oneshot_enabled` + 발신번호 충족 시 발급분을 문자로도 자동발송(D61/D68 #12). 즉 골드플러스 일괄변경 + 발송요일 지정 + 설정의 유료SMS 토글 ON 이면 지정 요일 오전에 SMS 까지 발송됨. 모달에 전제 안내. (전역 토글은 설정 화면에서 관리 — 일괄 액션이 임의로 켜지 않음.)
+- **권한**: 등급변경·조합발송 모두 `isAdmin` 게이트(유입분류·담당배정 등 대량 데이터 변경과 동일 정책). 위험도상 최고관리자만.
+- **영향**: 타입체크 통과(tsc 5.9 deprecation 경고는 tsconfig baseUrl 기존 이슈, 본 변경 무관). 신규 액션은 §8 연동대로 members 무효화 + admin_log(`member.bulk_settings_update`) 기록.

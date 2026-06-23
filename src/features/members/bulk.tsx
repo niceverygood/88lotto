@@ -1,17 +1,18 @@
 // 이용자 일괄작업 바 (CLAUDE §8). 선택 회원에 상태/유입분류 일괄변경,
 // 담당 배정·자동할당·리셋, 문자 발송을 적용한다. 위험 작업은 확인 모달(§10).
 import { useState } from 'react'
-import { UserPlus, Wand2, MessageSquare, RefreshCw, Tag, Eraser } from 'lucide-react'
+import { UserPlus, Wand2, MessageSquare, RefreshCw, Tag, Eraser, Award, CalendarClock } from 'lucide-react'
 import { BulkButton, ConfirmModal, Modal, Button } from '@/design-system/components'
-import { STATUS_META } from '@/design-system/labels'
+import { STATUS_META, GRADE_LABEL } from '@/design-system/labels'
 import { useStaff } from '@/lib/staff'
 import { useRole } from '@/lib/auth'
 import { koByteLength, classifyMsgType } from '@/lib/oneshot'
-import type { MemberStatus } from '@/types/db'
+import type { MemberStatus, Grade } from '@/types/db'
 import {
   useAssignStaff,
   useAutoAssign,
   useBulkUpdateMembers,
+  useBulkUpdateMemberSettings,
   useResetAssign,
   useResetMembers,
   useSendCustomSms,
@@ -20,9 +21,21 @@ import {
 } from './api'
 import { INFLOW_TYPES } from './views'
 
-type BulkModal = 'status' | 'inflow' | 'assign' | 'auto' | 'reset' | 'resetdb' | 'sms' | null
+type BulkModal =
+  | 'status'
+  | 'inflow'
+  | 'grade'
+  | 'reco'
+  | 'assign'
+  | 'auto'
+  | 'reset'
+  | 'resetdb'
+  | 'sms'
+  | null
 
 const STATUS_VALUES: MemberStatus[] = ['active', 'suspended', 'deleted', 'withdrawn']
+const GRADE_VALUES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 
 const selectCls =
   'h-9 w-full rounded-md border border-gray-300 bg-white px-2.5 text-[13px] text-gray-700 outline-none focus:border-primary-500'
@@ -43,6 +56,9 @@ export function MemberBulkActions({
   const [modal, setModal] = useState<BulkModal>(null)
   const [statusVal, setStatusVal] = useState<MemberStatus>('active')
   const [inflowVal, setInflowVal] = useState<string>(INFLOW_TYPES[0])
+  const [gradeVal, setGradeVal] = useState<Grade>('goldp')
+  const [recoDay, setRecoDay] = useState<string>('') // '' = 전역 기본(금)
+  const [recoCount, setRecoCount] = useState<string>('') // '' = 전역 기본
   const [staffVal, setStaffVal] = useState('')
   const [smsVal, setSmsVal] = useState('')
   const [smsMode, setSmsMode] = useState<'template' | 'direct'>('template')
@@ -53,6 +69,7 @@ export function MemberBulkActions({
   const { data: templates = [] } = useSmsTemplates()
 
   const bulkUpdate = useBulkUpdateMembers()
+  const bulkSettings = useBulkUpdateMemberSettings()
   const assign = useAssignStaff()
   const autoAssign = useAutoAssign()
   const reset = useResetAssign()
@@ -62,6 +79,7 @@ export function MemberBulkActions({
 
   const busy =
     bulkUpdate.isPending ||
+    bulkSettings.isPending ||
     assign.isPending ||
     autoAssign.isPending ||
     reset.isPending ||
@@ -105,6 +123,12 @@ export function MemberBulkActions({
         <>
           <BulkButton onClick={() => setModal('inflow')}>
             <Tag className="h-3.5 w-3.5" /> 유입분류
+          </BulkButton>
+          <BulkButton onClick={() => setModal('grade')}>
+            <Award className="h-3.5 w-3.5" /> 등급변경
+          </BulkButton>
+          <BulkButton onClick={() => setModal('reco')}>
+            <CalendarClock className="h-3.5 w-3.5" /> 조합발송
           </BulkButton>
           <BulkButton onClick={openAssign}>
             <UserPlus className="h-3.5 w-3.5" /> 담당배정
@@ -198,6 +222,107 @@ export function MemberBulkActions({
             </option>
           ))}
         </select>
+      </Modal>
+
+      {/* 등급 일괄변경 (위험·매출귀속/유료전환 영향) */}
+      <Modal
+        open={modal === 'grade'}
+        onClose={close}
+        title={`등급 일괄변경 · ${n}건`}
+        size="sm"
+        footer={
+          <>
+            <Button variant="sec" size="sm" onClick={close} disabled={busy}>
+              취소
+            </Button>
+            <Button
+              variant="pri"
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                bulkUpdate.mutate({ ids: selectedIds, patch: { grade: gradeVal } }, { onSuccess: done })
+              }
+            >
+              적용
+            </Button>
+          </>
+        }
+      >
+        <label className="mb-1.5 block text-[12px] font-semibold text-gray-600">변경할 등급</label>
+        <select className={selectCls} value={gradeVal} onChange={(e) => setGradeVal(e.target.value as Grade)}>
+          {GRADE_VALUES.map((g) => (
+            <option key={g} value={g}>
+              {GRADE_LABEL[g]}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-[11.5px] text-gray-400">
+          선택한 {n}명의 등급이 일괄 변경됩니다. 유료등급(골드·골드플러스·VIP·로얄)으로 올리면 매출 귀속·자동조합 대상에
+          영향을 줍니다. 결제 승인과 별개의 수동 변경이니 신중히 적용하세요.
+        </p>
+      </Modal>
+
+      {/* 조합발송 설정 일괄 (발송요일·갯수 → 익일 오전 자동조합) */}
+      <Modal
+        open={modal === 'reco'}
+        onClose={close}
+        title={`조합발송 설정 · ${n}건`}
+        size="sm"
+        footer={
+          <>
+            <Button variant="sec" size="sm" onClick={close} disabled={busy}>
+              취소
+            </Button>
+            <Button
+              variant="pri"
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                bulkSettings.mutate(
+                  {
+                    ids: selectedIds,
+                    patch: {
+                      weekly_reco_day: recoDay === '' ? null : Number(recoDay),
+                      weekly_reco_count: recoCount === '' ? null : Number(recoCount),
+                    },
+                  },
+                  { onSuccess: done },
+                )
+              }
+            >
+              적용
+            </Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-semibold text-gray-600">조합발송요일</span>
+            <select className={selectCls} value={recoDay} onChange={(e) => setRecoDay(e.target.value)}>
+              <option value="">전역 기본(금)</option>
+              {WEEKDAYS.map((d, i) => (
+                <option key={i} value={i}>
+                  {d}요일
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-semibold text-gray-600">조합발송갯수</span>
+            <input
+              className={selectCls}
+              inputMode="numeric"
+              placeholder="전역 기본(30)"
+              value={recoCount}
+              onChange={(e) => setRecoCount(e.target.value.replace(/\D/g, ''))}
+            />
+          </label>
+        </div>
+        <p className="mt-2.5 text-[11.5px] leading-relaxed text-gray-400">
+          매일 오전 09시 크론이 지정 요일에 해당하는 회원에게 조합을 자동 발급합니다. <b>익일 오전 발급</b>이
+          필요하면 발송요일을 <b>내일 요일</b>로 지정하세요(매주 그 요일 반복). 유료등급(골드·골드플러스·VIP·로얄)
+          회원은 설정의 <b>유료 조합 SMS 자동발송</b>·발신번호가 켜져 있으면 발급분이 문자로도 전송됩니다.
+        </p>
       </Modal>
 
       {/* 담당 배정 */}

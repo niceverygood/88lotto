@@ -348,6 +348,29 @@ export async function updateMemberMeta(
   await pushLog({ kind: 'admin', actor, action: 'member.settings_update', target_type: 'member', target_id: id, meta: { patch } })
 }
 
+/** 회원 meta 설정(조합발송요일/갯수 등) 일괄 갱신 — 각 회원 meta 를 병합 보존(다른 키 유지). */
+export async function bulkUpdateMemberMeta(
+  ids: string[],
+  patch: Record<string, unknown>,
+  actor: string | null,
+): Promise<void> {
+  // jsonb 는 회원마다 내용이 달라 일괄 update 로 덮으면 다른 키가 유실된다 → 회원별 병합 갱신.
+  const { data, error: fe } = await sb().from('members').select('id, meta').in('id', ids)
+  if (fe) throw fe
+  const rows = (data ?? []) as { id: string; meta: Record<string, unknown> | null }[]
+  for (const r of rows) {
+    const meta = (r.meta ?? {}) as Record<string, unknown>
+    const next = { ...meta }
+    for (const [k, val] of Object.entries(patch)) {
+      if (val === null || val === undefined || val === '') delete next[k]
+      else next[k] = val
+    }
+    const { error } = await sb().from('members').update({ meta: next }).eq('id', r.id)
+    if (error) throw error
+  }
+  await pushLog({ kind: 'admin', actor, action: 'member.bulk_settings_update', meta: { count: ids.length, ids, patch } })
+}
+
 /** 결제 요청 → 대기(wait) 결제 1건 생성. */
 export async function requestPayment(
   v: { memberId: string; productId: string; amount: number; method: string; depositorName?: string | null },
