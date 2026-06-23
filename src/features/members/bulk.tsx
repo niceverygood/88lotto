@@ -6,6 +6,7 @@ import { BulkButton, ConfirmModal, Modal, Button } from '@/design-system/compone
 import { STATUS_META } from '@/design-system/labels'
 import { useStaff } from '@/lib/staff'
 import { useRole } from '@/lib/auth'
+import { koByteLength, classifyMsgType } from '@/lib/oneshot'
 import type { MemberStatus } from '@/types/db'
 import {
   useAssignStaff,
@@ -305,7 +306,7 @@ export function MemberBulkActions({
               className="w-full rounded-md border border-gray-300 p-2 text-[12.5px] text-gray-700 outline-none focus:border-primary-500"
             />
             <div className="mt-1 text-right font-mono text-[10.5px] tnum text-gray-400">
-              {new Blob([smsBody]).size}byte · {new Blob([smsBody]).size > 90 ? 'LMS' : 'SMS'}
+              {koByteLength(smsBody)}byte · {classifyMsgType(smsBody)}
             </div>
           </>
         )}

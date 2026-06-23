@@ -222,6 +222,8 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
   const [serverErr, setServerErr] = useState<string | null>(null)
   const [pw, setPw] = useState('')
   const [pwBusy, setPwBusy] = useState(false)
+  // 신규 생성 후 부분성공(계정 저장 OK·비번 실패) 재시도 시 UPDATE 경로로 가도록 저장된 id 보존(D68 #9).
+  const [savedId, setSavedId] = useState<string | null>(null)
   // 비밀번호 설정/변경은 최고관리자 + 라이브(supabase) 모드에서만 — Auth 계정 프로비저닝. 현장 피드백 6/23(D67).
   const canPw = me?.role === 'admin' && dataSource === 'supabase'
 
@@ -259,9 +261,11 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
       auto_assign_enabled: v.role === 'rep' ? v.auto_assign_enabled : false,
     }
     save.mutate(
-      { id: staff?.id, input },
+      // 부분성공 재시도: 이미 INSERT 된 계정이면 savedId 로 UPDATE 경로 → 'ID 중복' 오류 회피(D68 #9).
+      { id: staff?.id ?? savedId ?? undefined, input },
       {
-        onSuccess: async () => {
+        onSuccess: async (returnedId: string) => {
+          setSavedId(returnedId)
           // 비밀번호 입력 시: 계정 저장 후 Auth 프로비저닝(이 아이디로 로그인 가능하게). 비우면 비번 변경 없음.
           if (canPw && pw.trim().length >= 6) {
             setPwBusy(true)
@@ -269,8 +273,8 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
               await setStaffPassword(v.login_id.trim(), pw.trim())
             } catch (e) {
               setPwBusy(false)
-              setServerErr('계정은 저장됐으나 비밀번호 설정 실패: ' + (e instanceof Error ? e.message : ''))
-              return // 드로어 유지 → 재시도 가능
+              setServerErr('계정은 저장됐으나 비밀번호 설정 실패: ' + (e instanceof Error ? e.message : '') + ' — 저장을 다시 눌러 재시도하세요.')
+              return // 드로어 유지 → 재시도(이제 UPDATE 경로라 중복오류 없음)
             }
             setPwBusy(false)
           }

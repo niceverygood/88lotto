@@ -10,13 +10,41 @@
 //
 // 이 파일은 api/ 디렉터리라 Vite 앱 빌드(tsconfig include=src)에 포함되지 않는다(Vercel 함수로 빌드).
 import { ProxyAgent, fetch as uFetch, FormData as UFormData } from 'undici'
+import { createClient } from '@supabase/supabase-js'
 
 const ONESHOT_BASE = 'https://api2.msgagent.com/api/webshot/send/general'
+
+// 호출자 인증(보안 D68): 무인증 공개 시 검증된 발신번호로 임의 SMS 가 무제한 발송 가능 →
+//   ① 서버-서버(크론): x-internal-secret === CRON_SECRET, 또는
+//   ② 브라우저(운영자): Authorization Bearer = 로그인 staff 의 Supabase access token.
+// 둘 중 하나도 충족 못 하면 401. (다른 api/ 함수와 동일한 인증 패턴.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function isAuthorized(req: any): Promise<boolean> {
+  const internal = String(req.headers?.['x-internal-secret'] ?? '')
+  const cronSecret = process.env.CRON_SECRET
+  if (internal && cronSecret && internal === cronSecret) return true // 크론(weekly-reco)
+  const token = String(req.headers?.authorization ?? '').replace(/^Bearer\s+/i, '')
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!token || !url || !key) return false
+  try {
+    const admin = createClient(url, key, { auth: { persistSession: false } })
+    const { data: ures } = await admin.auth.getUser(token)
+    const uid = ures?.user?.id
+    if (!uid) return false
+    const { data: st } = await admin.from('staff').select('id, is_active').eq('auth_user_id', uid).maybeSingle()
+    return !!st && (st as { is_active?: boolean }).is_active !== false
+  } catch {
+    return false
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ ok: false, code: 'METHOD', message: 'POST only' })
+  if (!(await isAuthorized(req)))
+    return res.status(401).json({ ok: false, code: 'AUTH', message: '인증 필요(로그인 또는 내부 호출만 허용)' })
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}

@@ -499,6 +499,13 @@ function formatComboSms(name: string, round: number, sets: number[][]): string {
   return `[88로또] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
 }
 
+/** 한국 문자 바이트 길이(비ASCII=2byte). SMS=90byte 기준. (src/lib/oneshot.ts koByteLength 동기화) */
+function koByteLength(s: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) n += s.charCodeAt(i) > 0x7f ? 2 : 1
+  return n
+}
+
 /** 검증된 발송 함수(/api/send-sms, Fixie 프록시 경유)를 재사용해 1건 발송. */
 async function sendComboSms(
   base: string,
@@ -509,8 +516,18 @@ async function sendComboSms(
   try {
     const r = await fetch(`${base}/api/send-sms`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dest_phone: dest, msg_body: body, send_phone: sender }),
+      headers: {
+        'content-type': 'application/json',
+        // 서버-서버 인증(보안 D68) — send-sms 가 내부 호출을 식별.
+        ...(process.env.CRON_SECRET ? { 'x-internal-secret': process.env.CRON_SECRET } : {}),
+      },
+      // msgType 명시(D68): 조합 본문은 90byte 초과라 LMS — 미지정 시 SMS 로 처리돼 402 길이초과 전건 실패.
+      body: JSON.stringify({
+        dest_phone: dest,
+        msg_body: body,
+        send_phone: sender,
+        msgType: koByteLength(body) <= 90 ? 'SMS' : 'LMS',
+      }),
     })
     const d = (await r.json()) as { ok?: boolean; code?: string }
     return { ok: !!d.ok, code: d.code }
@@ -526,8 +543,12 @@ const KEEP = 8
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default async function handler(req: any, res: any) {
+  // fail-closed(D68): CRON_SECRET 미설정이면 '열림'이 아니라 '차단'. 미설정을 가시화.
   const secret = process.env.CRON_SECRET
-  if (secret && req.headers?.authorization !== `Bearer ${secret}`) {
+  if (!secret) {
+    return res.status(500).json({ ok: false, code: 'CONFIG', message: 'CRON_SECRET 미설정' })
+  }
+  if (req.headers?.authorization !== `Bearer ${secret}`) {
     return res.status(401).json({ ok: false, code: 'AUTH' })
   }
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -548,15 +569,18 @@ export default async function handler(req: any, res: any) {
     const settings = sData as SiteSettingsLite
     const cfg = settings.weekly_free_reco ?? { enabled: true, set_count: DEFAULT_COUNT }
     const ratio = Math.max(0, Math.min(100, cfg.logic_ratio ?? 100)) // 로직:랜덤 비율(현장 피드백)
-    if (!cfg.enabled && !force) return res.status(200).json({ ok: true, skipped: 'disabled' })
 
     // 유료회원 지정요일 조합 SMS — 전용 토글(paid_sms) + 실발송(oneshot_enabled) + 발신번호 모두 충족 시만.
+    // (무료 자동발급 cfg.enabled 와 독립 — 무료만 꺼도 유료 SMS 는 계속 동작. D68 #12)
     const smsCfg = settings.sms ?? {}
     const paidSmsOn = !!smsCfg.oneshot_enabled && !!smsCfg.sender_no && !!cfg.paid_sms
     const sender = smsCfg.sender_no ?? ''
     const selfBase =
       process.env.SELF_BASE_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://plus-lotto.vercel.app')
+
+    // 무료 자동발급도 OFF, 유료 SMS 도 OFF 면 할 일 없음 → 종료.
+    if (!cfg.enabled && !paidSmsOn && !force) return res.status(200).json({ ok: true, skipped: 'disabled' })
 
     // PostgREST 1000행 캡 회피 — range 페이지네이션으로 전 회차 조회.
     const rounds: LottoRound[] = []
@@ -568,6 +592,13 @@ export default async function handler(req: any, res: any) {
       if (page.length < 1000) break
     }
     const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
+    // 적재 지연 감지(D68 #13, 비차단): 최신 회차 추첨일이 8일+ 지났으면 lotto 자동적재가 밀린 상태일 수 있어
+    // targetRound 가 '이미 지난 회차'를 가리킬 위험 → 발급은 막지 않되 로그로 가시화(운영 점검 신호).
+    const newest = rounds.reduce<LottoRound | null>((a, r) => (!a || r.round_no > a.round_no ? r : a), null)
+    const staleRound = !!newest && Date.now() - new Date(newest.draw_date).getTime() > 8 * 86400_000
+    if (staleRound) {
+      console.warn(`[weekly-reco] 최신 회차(${newest?.round_no}) 추첨일 8일+ 경과 — 회차 적재 지연 의심, targetRound=${targetRound}`)
+    }
     const baseCount = Math.max(1, cfg.set_count || DEFAULT_COUNT)
     // 등급별 고정/제외 규칙(없으면 공통 폴백) — 등급당 1회 해석 캐시.
     const excludeByGrade = new Map<string, LottoExcludeSettings>()
@@ -608,6 +639,7 @@ export default async function handler(req: any, res: any) {
     let skippedDay = 0
     let smsSent = 0
     let smsFail = 0
+    let errCount = 0
     for (const r of rows) {
       const meta = r.meta ?? {}
       const day =
@@ -617,6 +649,11 @@ export default async function handler(req: any, res: any) {
             ? DEFAULT_DAY
             : null // 유료 등 — 발송요일 미설정이면 자동발급 대상 아님
       if (day === null || (!force && day !== today)) {
+        skippedDay++
+        continue
+      }
+      // 무료 자동발급 OFF 시: 유료 지정요일 SMS 대상(paidSmsOn+유료등급)만 계속, 그 외(무료·기타)는 발급 안 함(D68 #12).
+      if (!cfg.enabled && !force && !(paidSmsOn && PAID_GRADES.has(r.grade))) {
         skippedDay++
         continue
       }
@@ -653,7 +690,10 @@ export default async function handler(req: any, res: any) {
       const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets }
       const nextMeta = { ...meta, weekly_recos: [issue, ...recos].slice(0, KEEP) }
       const { error } = await sb.from('members').update({ meta: nextMeta }).eq('id', r.id)
-      if (error) throw error
+      if (error) {
+        errCount++ // 단건 실패가 잔여 회원 발급을 막지 않도록 격리(D68 #8)
+        continue
+      }
       issued++
 
       // 유료회원(골드/골드+/VIP/로얄) 지정요일 조합 SMS 자동발송 — 신규 발급분만(멱등).
@@ -682,11 +722,11 @@ export default async function handler(req: any, res: any) {
       action: 'reco.weekly_issue',
       target_type: 'member',
       target_id: null,
-      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, round_no: targetRound, channel: 'cron', force, sms_sent: smsSent, sms_fail: smsFail },
+      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, errors: errCount, round_no: targetRound, stale_round: staleRound, channel: 'cron', force, sms_sent: smsSent, sms_fail: smsFail },
       created_at: ts,
     })
 
-    return res.status(200).json({ ok: true, round_no: targetRound, issued, skippedRound, skippedDay, smsSent, smsFail })
+    return res.status(200).json({ ok: true, round_no: targetRound, issued, skippedRound, skippedDay, errors: errCount, staleRound, smsSent, smsFail })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return res.status(500).json({ ok: false, code: 'ERROR', message })

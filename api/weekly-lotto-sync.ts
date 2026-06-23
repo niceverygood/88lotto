@@ -28,8 +28,12 @@ interface DhRow {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default async function handler(req: any, res: any) {
+  // fail-closed(D68): CRON_SECRET 미설정이면 차단.
   const secret = process.env.CRON_SECRET
-  if (secret && req.headers?.authorization !== `Bearer ${secret}`) {
+  if (!secret) {
+    return res.status(500).json({ ok: false, code: 'CONFIG', message: 'CRON_SECRET 미설정' })
+  }
+  if (req.headers?.authorization !== `Bearer ${secret}`) {
     return res.status(401).json({ ok: false, code: 'AUTH' })
   }
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -59,34 +63,43 @@ export default async function handler(req: any, res: any) {
     const j = (await r.json()) as { data?: { list?: DhRow[] } }
     const list = j?.data?.list ?? []
 
-    // 추첨 완료(번호 유효)하고 현재 max 보다 큰 회차만.
-    const rows = list
-      .filter((d) => d.ltEpsd > maxRound && d.tm1WnNo > 0)
-      .map((d) => {
-        const numbers = [d.tm1WnNo, d.tm2WnNo, d.tm3WnNo, d.tm4WnNo, d.tm5WnNo, d.tm6WnNo].sort((a, b) => a - b)
-        const sum = numbers.reduce((a, n) => a + n, 0)
-        const odd = numbers.filter((n) => n % 2 === 1).length
-        const y = d.ltRflYmd.slice(0, 4)
-        const mo = d.ltRflYmd.slice(4, 6)
-        const da = d.ltRflYmd.slice(6, 8)
-        return {
-          round_no: d.ltEpsd,
-          draw_date: `${y}-${mo}-${da}T20:45:00+09:00`,
-          numbers,
-          bonus: d.bnsWnNo,
-          sum,
-          odd_even: `홀${odd}:짝${6 - odd}`,
-          appear_rate: null,
-          prize_1: d.rnk1WnAmt ?? null,
-          prize_2: d.rnk2WnAmt ?? null,
-          prize_3: d.rnk3WnAmt ?? null,
-          total_sales: null,
-          confirmed_at: new Date().toISOString(),
-        }
-      })
+    // 추첨 완료·유효 회차만 — 응답 드리프트(필드 null/타입/누락) 시 크래시 대신 해당 행만 건너뜀(D68 #11).
+    const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+    const validBall = (v: unknown) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 45
+    const valid = list.filter(
+      (d) =>
+        isNum(d.ltEpsd) &&
+        d.ltEpsd > maxRound &&
+        typeof d.ltRflYmd === 'string' &&
+        /^\d{8}$/.test(d.ltRflYmd) &&
+        [d.tm1WnNo, d.tm2WnNo, d.tm3WnNo, d.tm4WnNo, d.tm5WnNo, d.tm6WnNo, d.bnsWnNo].every(validBall),
+    )
+    const skipped = list.length - valid.length
+    const rows = valid.map((d) => {
+      const numbers = [d.tm1WnNo, d.tm2WnNo, d.tm3WnNo, d.tm4WnNo, d.tm5WnNo, d.tm6WnNo].map(Number).sort((a, b) => a - b)
+      const sum = numbers.reduce((a, n) => a + n, 0)
+      const odd = numbers.filter((n) => n % 2 === 1).length
+      const y = d.ltRflYmd.slice(0, 4)
+      const mo = d.ltRflYmd.slice(4, 6)
+      const da = d.ltRflYmd.slice(6, 8)
+      return {
+        round_no: Number(d.ltEpsd),
+        draw_date: `${y}-${mo}-${da}T20:45:00+09:00`,
+        numbers,
+        bonus: Number(d.bnsWnNo),
+        sum,
+        odd_even: `홀${odd}:짝${6 - odd}`,
+        appear_rate: null,
+        prize_1: isNum(d.rnk1WnAmt) ? d.rnk1WnAmt : null,
+        prize_2: isNum(d.rnk2WnAmt) ? d.rnk2WnAmt : null,
+        prize_3: isNum(d.rnk3WnAmt) ? d.rnk3WnAmt : null,
+        total_sales: null,
+        confirmed_at: new Date().toISOString(),
+      }
+    })
 
     if (!rows.length) {
-      return res.status(200).json({ ok: true, maxRound, added: 0, note: '신규 추첨분 없음' })
+      return res.status(200).json({ ok: true, maxRound, added: 0, skipped, note: '신규 추첨분 없음' })
     }
     const { error } = await sb.from('lotto_rounds').upsert(rows, { onConflict: 'round_no' })
     if (error) throw error
@@ -97,10 +110,10 @@ export default async function handler(req: any, res: any) {
       action: 'lotto.auto_sync',
       target_type: 'lotto_round',
       target_id: null,
-      meta: { added: rows.length, rounds: rows.map((x) => x.round_no), maxBefore: maxRound },
+      meta: { added: rows.length, skipped, rounds: rows.map((x) => x.round_no), maxBefore: maxRound },
       created_at: new Date().toISOString(),
     })
-    return res.status(200).json({ ok: true, maxRound, added: rows.length, rounds: rows.map((x) => x.round_no) })
+    return res.status(200).json({ ok: true, maxRound, added: rows.length, skipped, rounds: rows.map((x) => x.round_no) })
   } catch (e) {
     return res.status(500).json({ ok: false, code: 'ERROR', message: e instanceof Error ? e.message : String(e) })
   }

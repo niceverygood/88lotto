@@ -2,6 +2,7 @@
 // 실제 전송은 서버(Vercel 함수 /api/send-sms)가 '고정 IP 프록시' 경유로 수행한다 — OneShot 은
 // 요청 IP 화이트리스트 인증이라 브라우저/서버리스 가변 IP 로 직접 호출할 수 없다(키도 없음).
 // 여기서는 그 함수를 호출하고 결과 코드를 해석만 한다.
+import { supabase } from './supabase'
 
 /** 한국 문자 바이트 길이(비ASCII=2바이트). SMS=90byte 기준. */
 export function koByteLength(s: string): number {
@@ -37,9 +38,13 @@ export interface OneShotSendInput {
 export async function sendOneShot(input: OneShotSendInput): Promise<OneShotResult> {
   const msgType = input.msgType ?? classifyMsgType(input.msg_body)
   try {
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    // 로그인 운영자 세션 토큰 첨부 — 서버가 staff 인증 후에만 실발송(보안 D68). mock 모드는 세션 없음.
+    const token = (await supabase?.auth.getSession())?.data.session?.access_token
+    if (token) headers.authorization = `Bearer ${token}`
     const r = await fetch('/api/send-sms', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({ ...input, msgType }),
     })
     return (await r.json()) as OneShotResult

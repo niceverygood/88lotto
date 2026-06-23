@@ -17,6 +17,7 @@ import { GRADE_LABEL, PAYMENT_METHOD_LABEL, SMS_TYPE_LABEL } from '@/design-syst
 import { date, datetime, krw, phone } from '@/lib/format'
 import { useStaff, useTeams } from '@/lib/staff'
 import { useRole } from '@/lib/auth'
+import { koByteLength, classifyMsgType } from '@/lib/oneshot'
 import { homepageId, homepagePw } from '@/lib/homepage'
 import { CONSULT_STATUSES } from './views'
 import type { Grade, WeeklyRecoIssue } from '@/types/db'
@@ -506,7 +507,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             />
             <div className="mt-1.5 flex items-center justify-between">
               <span className="font-mono text-[10.5px] tnum text-gray-400">
-                {new Blob([smsBody]).size}byte {new Blob([smsBody]).size > 90 ? '· LMS' : '· SMS'}
+                {koByteLength(smsBody)}byte · {classifyMsgType(smsBody)}
               </span>
               <Button
                 size="sm"

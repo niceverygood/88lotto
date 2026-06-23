@@ -581,8 +581,12 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
       sent_at: ts,
     })
   }
+  // 발송내역 기록 실패는 throw 하지 않음(D68 #7) — 실발송이 이미 나간 뒤라 '실패' 표시·재발송 유도를 막는다.
   const { error: e2 } = await sb().from('sms_sends').insert(rows)
-  if (e2) throw e2
+  if (e2) {
+    console.warn('[sms] sms_sends insert 실패(발송내역 미기록):', e2.message)
+    await pushLog({ kind: 'sms', actor, action: 'sms.record_failed', target_type: 'member', target_id: null, meta: { count: rows.length, template: templateKey, error: e2.message } })
+  }
   await pushLog({ kind: 'sms', actor, action: 'sms.send', target_type: 'member', target_id: null, meta: { count: rows.length, template: templateKey, real: realSend } })
 }
 
@@ -622,8 +626,12 @@ export async function sendCustomSms(ids: string[], body: string, actor: string |
       sent_at: ts,
     })
   }
+  // 기록 실패 best-effort(D68 #7) — 실발송 후라 throw 시 '실패' 오표시·재발송 위험.
   const { error } = await sb().from('sms_sends').insert(rows)
-  if (error) throw error
+  if (error) {
+    console.warn('[sms] 직접발송 sms_sends insert 실패(미기록):', error.message)
+    await pushLog({ kind: 'sms', actor, action: 'sms.record_failed', target_type: 'member', target_id: null, meta: { count: rows.length, kind: 'direct', error: error.message } })
+  }
   await pushLog({ kind: 'sms', actor, action: 'sms.send_direct', target_type: 'member', target_id: ids.length === 1 ? ids[0] : null, meta: { count: rows.length, real: realSend } })
 }
 
@@ -668,7 +676,11 @@ export async function manualIssueReco(
       status,
       sent_at: ts,
     })
-    if (error) throw error
+    // 기록 실패 best-effort(D68 #7) — 실발송 후라 throw 시 발급 자체가 롤백/오류로 보임.
+    if (error) {
+      console.warn('[sms] 수동조합 sms_sends insert 실패(미기록):', error.message)
+      await pushLog({ kind: 'sms', actor, action: 'sms.record_failed', target_type: 'member', target_id: v.memberId, meta: { kind: 'reco', error: error.message } })
+    }
   }
   await pushLog({ kind: 'admin', actor, action: 'reco.manual_issue', target_type: 'member', target_id: v.memberId, meta: { round_no: targetRound, set_count: res.sets.length, sms: v.alsoSms } })
   return { round_no: targetRound, sets: res.sets }

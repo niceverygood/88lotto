@@ -6,7 +6,22 @@ import { insertLog, sb } from '@/lib/db/remote'
 
 /** 사이트 설정 전체 저장(단일행 id=1). 등급색 변경은 gradeTheme 가 토큰으로 전파(§3). */
 export async function saveSiteSettings(next: SiteSettings, actor: string | null): Promise<void> {
-  const { error } = await sb().from('site_settings').update({ ...next }).eq('id', 1)
+  // 실 컬럼만 명시 picking(D68 #6). update({...next}) 는 폼이 실은 여분키(id 등)·신규 타입필드를
+  // 그대로 PATCH 해 D60 처럼 마이그레이션 누락 시 PGRST204 로 전 설정 저장이 통째 실패하던 구조를 방지.
+  const payload: Record<keyof SiteSettings, unknown> = {
+    bank: next.bank,
+    grade_colors: next.grade_colors,
+    pg_providers: next.pg_providers,
+    sms: next.sms,
+    win_messages: next.win_messages,
+    report: next.report,
+    lotto_exclude: next.lotto_exclude,
+    lotto_exclude_history: next.lotto_exclude_history,
+    weekly_free_reco: next.weekly_free_reco,
+    terms: next.terms,
+    terms_by_grade: next.terms_by_grade,
+  }
+  const { error } = await sb().from('site_settings').update(payload).eq('id', 1)
   if (error) throw error
   await insertLog({
     kind: 'admin',
