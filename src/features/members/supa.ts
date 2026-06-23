@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { genId, nowIso } from '@/lib/db/store'
 import { recoSmsBody, renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
-import { selectAll } from '@/lib/db/remote'
+import { paginateAll, selectAll } from '@/lib/db/remote'
 import { resolveExcludeForGrade } from '@/lib/lotto'
 import { generateIssueSets } from '@/lib/lottoGenerator'
 import type { ManualIssueInput, MemberCreateInput, MemberPatch, MySmsRow } from './api'
@@ -56,25 +56,29 @@ async function pushLog(row: {
 // ── 읽기 ──────────────────────────────────────────────────────────────────
 /** 역할 스코프된 전체 회원(RLS 적용). 뷰/필터/정렬/페이지는 호출측 listFrom 이 처리. */
 export async function fetchScopedMembers(): Promise<Member[]> {
-  const { data, error } = await sb().from('members').select('*')
-  if (error) throw error
-  return (data ?? []) as Member[]
+  // ★ 1000행 캡 우회: 회원 1,985명(→15만 예정)을 한 번의 select 로는 못 가져온다.
+  //   캡에 걸리면 1000번째 이후 회원이 목록·세그먼트·일괄작업에서 통째로 사라진다
+  //   (현장: "100건 전체선택 담당배정 시 일부만 배정" — 캡 너머 회원이 선택 자체가 안 됨 / D69).
+  return selectAll<Member>('members')
 }
 
 /** 내가 담당하는 회원만(나의고객). RLS 가시성 내에서 assigned_staff_id=uid 로 한정. */
 export async function fetchMineMembers(uid: string): Promise<Member[]> {
   if (!uid) return []
-  const { data, error } = await sb().from('members').select('*').eq('assigned_staff_id', uid)
-  if (error) throw error
-  return (data ?? []) as Member[]
+  // 담당 회원도 1000명 초과 가능 → range 로 전량(캡 우회).
+  return paginateAll<Member>((from, to) =>
+    sb().from('members').select('*').eq('assigned_staff_id', uid).range(from, to),
+  )
 }
 
 /** assigned_staff_id → role 매핑(필터 ctx 용). roleScope 뷰(실장/팀장담당)가 사용. */
 /** 실제 데이터의 유입코드 distinct 목록(필터 드롭다운용). RLS 로 역할 스코프 자동 적용. */
 export async function fetchInflowCodes(): Promise<string[]> {
-  const { data, error } = await sb().from('members').select('inflow_code').not('inflow_code', 'is', null)
-  if (error) throw error
-  const codes = ((data ?? []) as { inflow_code: string | null }[])
+  // 전량(1000행 캡 우회) — 캡에 걸리면 1000번째 이후 회원의 유입코드가 드롭다운에서 누락.
+  const data = await paginateAll<{ inflow_code: string | null }>((from, to) =>
+    sb().from('members').select('inflow_code').not('inflow_code', 'is', null).range(from, to),
+  )
+  const codes = data
     .map((r) => r.inflow_code)
     .filter((c): c is string => !!c && c.trim().length > 0)
   return Array.from(new Set(codes))
@@ -156,7 +160,11 @@ export async function fetchMineSmsLog(uid: string, limit: number): Promise<MySms
 export async function createMember(input: MemberCreateInput, actor: string | null): Promise<string> {
   const id = genId('m')
   const digits = (s: string) => s.replace(/\D/g, '')
-  const { data: existing } = await sb().from('members').select('phone, user_id')
+  // 중복검사·user_id 채번은 전체 회원 대상 — 1000행 캡에 걸리면 캡 너머 회원과 중복을 못 잡아
+  // 실데이터(15만) 임포트 시 중복이 그대로 들어간다. range 로 전량 조회(D69).
+  const existing = await paginateAll<{ phone: string; user_id: string }>((from, to) =>
+    sb().from('members').select('phone, user_id').range(from, to),
+  )
   const rows = (existing ?? []) as { phone: string; user_id: string }[]
   const phone = digits(input.phone)
   const dup = phone.length > 0 && rows.some((m) => digits(m.phone) === phone)
@@ -226,7 +234,11 @@ export async function bulkImportMembers(
   actor: string | null,
 ): Promise<{ created: number; dup: number }> {
   const digits = (s: string) => s.replace(/\D/g, '')
-  const { data: existing } = await sb().from('members').select('phone, user_id')
+  // 중복검사·user_id 채번은 전체 회원 대상 — 1000행 캡에 걸리면 캡 너머 회원과 중복을 못 잡아
+  // 실데이터(15만) 임포트 시 중복이 그대로 들어간다. range 로 전량 조회(D69).
+  const existing = await paginateAll<{ phone: string; user_id: string }>((from, to) =>
+    sb().from('members').select('phone, user_id').range(from, to),
+  )
   const rows = (existing ?? []) as { phone: string; user_id: string }[]
   const phones = new Set(rows.map((m) => digits(m.phone)).filter(Boolean))
   let seq = rows.reduce((mx, m) => {

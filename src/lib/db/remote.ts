@@ -17,20 +17,28 @@ export function sb(): SupabaseClient {
 // 배열 테이블(테이블명 == DbShape 키). nav_access·site_settings 는 별도 형태.
 type ArrayKey = Exclude<keyof DbShape, 'nav_access' | 'site_settings'>
 
-/** 단일 테이블 전체 조회(RLS 스코프 자동 적용). */
-// PostgREST 는 응답을 기본 1000행으로 캡한다 → range 페이지네이션으로 전량 조회.
-// (회차 1,227건 적재 후 발견 — 단건 select('*') 는 최신 회차가 잘려나감)
-export async function selectAll<T>(table: string): Promise<T[]> {
+// range 페이지네이션 코어. PostgREST 는 응답을 기본 1000행으로 캡하므로, 1000행 초과 테이블은
+// 한 번의 select 로 전량을 못 가져온다(회차 1,227건·회원 1,985명 적재 후 발견 — 뒷부분이 잘림).
+// build(from,to) 는 .range 가 적용된 새 쿼리를 반환해야 한다(필터·정렬은 build 안에서 부여).
+// TODO(scale): 수만건+ 규모에선 server-side 필터/페이지네이션으로 이관 필요(현재는 클라 필터 구조).
+export async function paginateAll<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
   const PAGE = 1000
   const out: T[] = []
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb().from(table).select('*').range(from, from + PAGE - 1)
-    if (error) throw error
-    const rows = (data ?? []) as T[]
+  for (let from = 0; from < 500_000; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
     out.push(...rows)
     if (rows.length < PAGE) break
   }
   return out
+}
+
+/** 단일 테이블 전체 조회(RLS 스코프 자동 적용). 1000행 캡을 range 로 우회. */
+export async function selectAll<T>(table: string): Promise<T[]> {
+  return paginateAll<T>((from, to) => sb().from(table).select('*').range(from, to))
 }
 
 /** 여러 배열 테이블을 병렬 조회해 readDb()-호환 부분 스냅샷으로 반환. */
