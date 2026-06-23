@@ -15,6 +15,8 @@ import { datetime } from '@/lib/format'
 import { assignableRoles, canManageStaff, ROLE_LABEL, ROLE_ORDER } from '@/lib/permissions'
 import type { Role, Staff } from '@/types/db'
 import { useSaveStaff, useToggleStaffActive, useTodayDbCounts, type StaffInput } from './api'
+import { dataSource } from '@/lib/supabase'
+import { setStaffPassword } from './supa'
 
 const inputCls =
   'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none focus:border-primary-500'
@@ -218,6 +220,10 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
   const me = useCurrentUser()
   const { data: teams = [] } = useTeams()
   const [serverErr, setServerErr] = useState<string | null>(null)
+  const [pw, setPw] = useState('')
+  const [pwBusy, setPwBusy] = useState(false)
+  // 비밀번호 설정/변경은 최고관리자 + 라이브(supabase) 모드에서만 — Auth 계정 프로비저닝. 현장 피드백 6/23(D67).
+  const canPw = me?.role === 'admin' && dataSource === 'supabase'
 
   // 계층 위임(§5): 부여 가능한 역할로 제한. 본인 역할은 변경 불가. 팀장은 본인 팀으로 고정.
   const roleOptions = assignableRoles(me?.role ?? null)
@@ -254,7 +260,24 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
     }
     save.mutate(
       { id: staff?.id, input },
-      { onSuccess: onClose, onError: (e) => setServerErr(e instanceof Error ? e.message : '저장에 실패했습니다.') },
+      {
+        onSuccess: async () => {
+          // 비밀번호 입력 시: 계정 저장 후 Auth 프로비저닝(이 아이디로 로그인 가능하게). 비우면 비번 변경 없음.
+          if (canPw && pw.trim().length >= 6) {
+            setPwBusy(true)
+            try {
+              await setStaffPassword(v.login_id.trim(), pw.trim())
+            } catch (e) {
+              setPwBusy(false)
+              setServerErr('계정은 저장됐으나 비밀번호 설정 실패: ' + (e instanceof Error ? e.message : ''))
+              return // 드로어 유지 → 재시도 가능
+            }
+            setPwBusy(false)
+          }
+          onClose()
+        },
+        onError: (e) => setServerErr(e instanceof Error ? e.message : '저장에 실패했습니다.'),
+      },
     )
   })
 
@@ -265,11 +288,11 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
       title={staff ? '계정 수정' : '새 계정 생성'}
       footer={
         <>
-          <Button variant="sec" size="sm" onClick={onClose} disabled={save.isPending}>
+          <Button variant="sec" size="sm" onClick={onClose} disabled={save.isPending || pwBusy}>
             취소
           </Button>
-          <Button variant="pri" size="sm" onClick={submit} disabled={save.isPending}>
-            저장
+          <Button variant="pri" size="sm" onClick={submit} disabled={save.isPending || pwBusy}>
+            {pwBusy ? '계정 설정 중…' : '저장'}
           </Button>
         </>
       }
@@ -319,9 +342,28 @@ function StaffEditor({ staff, onClose }: { staff: Staff | null; onClose: () => v
             라운드로빈 풀에 포함)
           </label>
         )}
-        <p className="rounded-md bg-gray-50 px-3 py-2 text-[11.5px] leading-relaxed text-gray-500">
-          비밀번호는 이 화면에서 설정하지 않습니다. 데모 환경은 로그인 ID 로 인증합니다.
-        </p>
+        {canPw ? (
+          <div className="border-t border-gray-100 pt-3">
+            <label className={labelCls}>비밀번호 {staff ? '변경' : '설정'}</label>
+            <input
+              type="password"
+              className={inputCls}
+              autoComplete="new-password"
+              placeholder={staff ? '변경 시에만 입력 (6자 이상)' : '로그인 비밀번호 (6자 이상)'}
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+            />
+            <p className="mt-1 text-[11.5px] leading-relaxed text-gray-400">
+              입력하면 이 아이디로 로그인할 계정이 생성/갱신됩니다. 비우면 비밀번호는 변경되지 않습니다.
+            </p>
+          </div>
+        ) : (
+          <p className="rounded-md bg-gray-50 px-3 py-2 text-[11.5px] leading-relaxed text-gray-500">
+            {dataSource === 'supabase'
+              ? '비밀번호 설정/변경은 최고관리자만 가능합니다.'
+              : '데모(mock) 환경은 로그인 ID 로 인증합니다.'}
+          </p>
+        )}
       </div>
     </Drawer>
   )

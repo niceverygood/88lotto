@@ -22,6 +22,22 @@ export async function fetchTodayDbCounts(): Promise<Record<string, TodayDbCount>
   )
 }
 
+// 운영자 Auth 비밀번호 설정/생성 — 서버 함수(/api/staff-set-password, service_role) 호출.
+// login_id 기준으로 Auth 유저를 보장(없으면 생성·있으면 비번변경)하고 staff.auth_user_id 링크.
+// 최고관리자만 호출 가능(서버에서 access token 으로 재검증). 현장 피드백 6/23.
+export async function setStaffPassword(login_id: string, password: string): Promise<void> {
+  const { data } = await sb().auth.getSession()
+  const token = data.session?.access_token
+  if (!token) throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.')
+  const r = await fetch('/api/staff-set-password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ login_id, password }),
+  })
+  const j = (await r.json().catch(() => ({}))) as { ok?: boolean; message?: string }
+  if (!r.ok || !j.ok) throw new Error(j.message || `비밀번호 설정 실패 (${r.status})`)
+}
+
 /** 운영자 계정 생성/수정. login_id 중복은 거부(throw). 반환=staff id. */
 export async function saveStaff(
   v: { id?: string; input: StaffInput },
