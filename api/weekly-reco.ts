@@ -496,7 +496,7 @@ const PAID_GRADES = new Set(['gold', 'goldp', 'vip', 'royal'])
 /** 조합 목록 → SMS 본문(LMS). */
 function formatComboSms(name: string, round: number, sets: number[][]): string {
   const lines = sets.map((s, i) => `${String(i + 1).padStart(2, '0')}. ${s.join(', ')}`)
-  return `[플러스로또] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
+  return `[88로또] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
 }
 
 /** 검증된 발송 함수(/api/send-sms, Fixie 프록시 경유)를 재사용해 1건 발송. */

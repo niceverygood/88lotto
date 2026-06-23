@@ -412,3 +412,7 @@
 - **결정**: 항목1(회차 오류) 근본원인은 lotto_rounds 데이터 밀림(1227 정지). 즉시해소는 운영자 1228·1229 회차등록, 재발방지는 자동크론(대표 "둘 다" 승인). `api/weekly-lotto-sync.ts`(Vercel 함수) + `vercel.json` cron(매일 23:00 UTC=08:00 KST, 추천발급 09:00 직전). 매 실행 시 lotto_rounds max+1 부터 동행복권 내부 API(`selectPstLt645Info.do`, Mozilla UA+Referer)로 추첨 완료 신규 회차를 받아 upsert(번호·보너스·sum·홀짝·1~3등 당첨금·추첨일). CRON_SECRET Bearer + SERVICE_ROLE.
 - **검증**: 동행복권 내부 API 로컬 curl 정상(1229=12,13,29,34,37,42 b16 / 6/20 추첨, 워크플로 보고와 일치). 1228=24,29,30,31,35,44 b1. **WAF/egress 주의**: 레거시 common.do 는 차단, 내부 API 는 Mozilla UA 로 통과. Vercel egress(US) 차단 가능성 있어 크론은 실패 시 no-op+로그(크래시 안 함), 운영자 회차등록이 안전망. 배포 후 `?force`(현재 무인증 401 가드만, secret 필요) 또는 secret 으로 실호출 검증.
 - **영향**: 크론 단독 tsc 통과. prize_1=rnk1WnAmt(1인당, D59 관례). confirmed_at=now(자동 확정 표기, 베팅 채점은 크론 미수행 — 미래회차 베팅 없음). **잔여(운영자)**: 1228·1229 즉시 회차등록(아래 안내) — 크론은 다음 추첨(1230, 6/27)부터 자동.
+
+### D66. 전산 명칭 변경 플러스로또 → 88로또 (현장 피드백 6/23)
+- **결정**: 운영사 요청으로 서비스 표시명을 '플러스로또' → '88로또'. 코드 사용자노출 문자열 일괄 변경(sed): UI 로고 4곳(AppShell·LoginPage·PortalPage·Dashboard title)·`lib/sms.recoSmsBody`·`api/weekly-reco` 조합SMS·`seed.ts`(템플릿/당첨문자/약관/은행)·`index.html` title. 라이브 DB도 업데이트: `sms_templates` 3건·`site_settings`(win_messages 5·terms·bank.holder). 잔존 '플러스로또'는 내부 주석 3곳(types/db.ts·rls/policies.sql·tokens.css)만 — 코드네임/레포명 PlusLotto 는 유지.
+- **영향**: 앱 빌드·크론 tsc 통과. 검증: 가입 템플릿 '[88로또] …', sms_templates 잔존 0건. recoSmsBody/추천발송/크론 본문 '[88로또]'. **별건(운영자)**: 기존 테스트 회원 DB 삭제는 운영자 SQL 실행(아래 안내, `delete from members` cascade) — 금일 실데이터 입력 준비.
