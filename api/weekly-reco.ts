@@ -640,6 +640,13 @@ export default async function handler(req: any, res: any) {
     let smsSent = 0
     let smsFail = 0
     let errCount = 0
+    // 1) 적격 회원 선별(게이트) — CPU만, 빠름. 발급/발송은 2)에서 병렬.
+    const eligible: {
+      r: (typeof rows)[number]
+      meta: Record<string, unknown>
+      recos: WeeklyRecoIssue[]
+      count: number
+    }[] = []
     for (const r of rows) {
       const meta = r.meta ?? {}
       const day =
@@ -657,7 +664,6 @@ export default async function handler(req: any, res: any) {
         skippedDay++
         continue
       }
-      const exclude = excludeFor(r.grade)
       const recos = Array.isArray(meta.weekly_recos) ? (meta.weekly_recos as WeeklyRecoIssue[]) : []
       if (recos[0]?.round_no === targetRound) {
         skippedRound++
@@ -667,6 +673,14 @@ export default async function handler(req: any, res: any) {
         typeof meta.weekly_reco_count === 'number' && (meta.weekly_reco_count as number) > 0
           ? (meta.weekly_reco_count as number)
           : baseCount
+      eligible.push({ r, meta, recos, count })
+    }
+
+    // 2) 발급 + (유료)SMS — 동시성 제한 병렬. 순차로는 1000+명 발송이 함수 타임아웃(수십분)에 걸려
+    //    일부만 나가던 위험을 차단(현장 6/24, 이윤선 1883명 대비). 단건 실패는 격리(잔여 진행).
+    const CONC = 12
+    const processOne = async ({ r, meta, recos, count }: (typeof eligible)[number]) => {
+      const exclude = excludeFor(r.grade)
       // 로직 round(count×ratio%) + 완전랜덤 나머지(소스: src/lib/lottoGenerator.generateIssueSets)
       const logicCount = Math.max(0, Math.min(count, Math.round((count * ratio) / 100)))
       const sets =
@@ -692,7 +706,7 @@ export default async function handler(req: any, res: any) {
       const { error } = await sb.from('members').update({ meta: nextMeta }).eq('id', r.id)
       if (error) {
         errCount++ // 단건 실패가 잔여 회원 발급을 막지 않도록 격리(D68 #8)
-        continue
+        return
       }
       issued++
 
@@ -701,7 +715,8 @@ export default async function handler(req: any, res: any) {
         const smsBody = formatComboSms(r.name ?? '', targetRound, sets)
         const sres = await sendComboSms(selfBase, r.phone, smsBody, sender)
         await sb.from('sms_sends').insert({
-          id: `sms_cron_${Date.now().toString(36)}_${r.id.slice(-6)}`,
+          // 병렬 동시삽입 PK 충돌 방지: 시간+난수+회원 꼬리.
+          id: `sms_cron_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}_${r.id.slice(-6)}`,
           member_id: r.id,
           template_key: null,
           phone: r.phone,
@@ -713,6 +728,9 @@ export default async function handler(req: any, res: any) {
         if (sres.ok) smsSent++
         else smsFail++
       }
+    }
+    for (let i = 0; i < eligible.length; i += CONC) {
+      await Promise.all(eligible.slice(i, i + CONC).map(processOne))
     }
 
     await sb.from('logs').insert({
