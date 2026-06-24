@@ -452,3 +452,10 @@
   - **자동조합**: 신규 `useBulkUpdateMemberSettings` → `supa.bulkUpdateMemberMeta(ids, patch)` — 선택 회원 meta 를 25건씩 병렬로 `weekly_reco_day`(0=일..6=토, ''=전역기본 금)·`weekly_reco_count` 병합 갱신(jsonb 병합이라 회원별 개별 update). 발송요일+갯수 모달.
 - **연동(기존 크론 그대로)**: `api/weekly-reco.ts` 가 매일 09:00 KST, `meta.weekly_reco_day===오늘요일`인 회원에게 `meta.weekly_reco_count`(없으면 전역 set_count)개 조합 발급→`meta.weekly_recos[]`(홈페이지 조회). PAID_GRADES=gold/goldp/vip/royal 는 발송요일 지정 회원만 대상. 라이브 `weekly_free_reco.enabled=true`라 유료회원도 발급됨. (SMS 자동발송은 `weekly_free_reco.paid_sms` 토글 별도 — 현재 OFF 라 홈페이지 발급만, 문자는 안 나감.)
 - **검증(2026-06-23, 라이브)**: 빌드(3604모듈) 통과. 회원 1명 캡처→`grade=goldp`+`meta.weekly_reco_day=2/count=10` 적용→정확 반영 확인→원복 정상(되돌릴 1명만 사용, 100명 실데이터는 미변경). **실행 주체**: 100명 적용은 운영자가 UI 에서(김형준 담당 필터→전체선택→등급변경 골드플러스→자동조합 요일·10조합). 익일 오전 발급되려면 내일 09:00 KST 전에 '내일 요일'로 설정 필요.
+
+### D71. 한글검색 IME 수정 + 문자내역 접수상태 + 크론 타임아웃 + 조합로직 문서 (현장 6/24)
+- **한글 검색 IME 수정**: `FilterBar` 검색 input 이 URL 파라미터로 완전제어돼, 키 입력마다 URL→재렌더→value 재설정으로 **한글 조합이 자모마다 끊김**("정의현"→"ㅈㅓㅇㅇㅡㅣㅎㅕㄴ"). → 로컬 상태 + `compositionStart/End` 로 분리(조합 중엔 부모 전파 안 함, 종료 시 반영). 전 FilterBar 사용처 공통 수정.
+- **문자내역 접수상태 표시**: `MemberDrawer` 문자내역 탭에 `status`(발송완료=문자사 접수성공/실패/미발송) 칩 추가. 추후 회원 분쟁 대처 증빙(현장: "전산이 문자업체에 접수한 기록을 나중에라도 찾을 수 있나" → 회원 상세 문자내역에 시각·내용·상태 영구보존). 접수성공≠실발송(업체 발송확인) 구분도 안내.
+- **크론 타임아웃**: `vercel.json` `functions.maxDuration` — `weekly-reco` 300s(유료 SMS ON 시 100+통 순차발송이 기본 10s 초과해 일부만 나가던 위험 차단), `weekly-lotto-sync` 60s, `send-sms` 30s.
+- **조합생성 로직 문서**: `docs/조합생성_로직_구현현황.md`(+`.docx`, 생성기 `scripts/build-logic-doc.cjs`) — 제공 「제외수 프로그램」 5규칙·압축·품질필터·로직:랜덤·고정/제외·확률정직성을 구현(`lib/lottoGenerator.ts`)과 1:1 대조.
+- **라이브 운영 기록(코드 아님)**: 김형준 100명→골드플러스+수요일 10조합(6/24 09시 크론 발급·SMS 발송, 업체 92/100=접수100·실발송92, 8건 결번 추정). 이윤선 1883명→골드 일괄(임시 스크립트 bare-GET 캡으로 1차 1000명만→전량 페이지네이션 재적용 1883/1883). UI 일괄선택은 페이지당 최대 1000이라 1000초과 담당은 백엔드/2페이지 처리.

@@ -534,7 +534,24 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             render={(s) => (
               <div key={s.id} className="border-b border-gray-100 py-2.5">
                 <div className="flex items-center justify-between">
-                  <StatusChip tone="info" label={SMS_TYPE_LABEL[s.type]} />
+                  <div className="flex items-center gap-1.5">
+                    <StatusChip tone="info" label={SMS_TYPE_LABEL[s.type]} />
+                    {/* 접수 결과(문자사 접수성공=발송완료) — 추후 회원 분쟁 대처용 증빙(현장 피드백) */}
+                    {s.status && (
+                      <span
+                        className={
+                          'rounded px-1.5 py-0.5 text-[10px] font-semibold ' +
+                          (s.status.includes('완료')
+                            ? 'bg-success/10 text-success'
+                            : s.status.includes('실패')
+                              ? 'bg-danger/10 text-danger'
+                              : 'bg-gray-100 text-gray-500')
+                        }
+                      >
+                        {s.status}
+                      </span>
+                    )}
+                  </div>
                   <span className="font-mono text-[10.5px] tnum text-gray-400">{datetime(s.sent_at)}</span>
                 </div>
                 <p className="mt-1.5 text-[12px] leading-relaxed text-gray-600">{s.body}</p>
