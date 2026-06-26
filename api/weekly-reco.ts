@@ -626,6 +626,7 @@ export default async function handler(req: any, res: any) {
         .select('id, grade, name, phone, meta')
         .eq('is_deleted', false)
         .eq('is_withdrawn', false)
+        .eq('is_suspended', false) // 일시정지(정지) 회원은 자동발급·문자 제외(현장 6/26)
         .order('id')
         .range(from, from + 999)
       if (me) throw me
@@ -661,6 +662,12 @@ export default async function handler(req: any, res: any) {
       }
       // 무료 자동발급 OFF 시: 유료 지정요일 SMS 대상(paidSmsOn+유료등급)만 계속, 그 외(무료·기타)는 발급 안 함(D68 #12).
       if (!cfg.enabled && !force && !(paidSmsOn && PAID_GRADES.has(r.grade))) {
+        skippedDay++
+        continue
+      }
+      // 일시정지(조합발송 중단) 또는 발송갯수 명시적 0 → 발급·문자 제외(현장 6/26).
+      // (count=0 은 기존엔 전역기본으로 폴백돼 발송됐으나, '0=중단' 직관에 맞게 차단)
+      if (meta.reco_paused === true || meta.weekly_reco_count === 0) {
         skippedDay++
         continue
       }

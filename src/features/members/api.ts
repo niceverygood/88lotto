@@ -431,6 +431,8 @@ export interface MemberSettingsPatch {
   homepage_pw?: string | null // 홈페이지 로그인 비번(미설정 시 전화 뒷4자리)
   weekly_reco_day?: number | null // 조합발송요일 0=일..6=토 (미설정 시 전역 기본=금)
   weekly_reco_count?: number | null // 조합발송갯수 (미설정 시 전역 기본)
+  end_date?: string | null // 구독 종료일(수정용 override) — 미설정 시 결제 period_end (현장 6/26)
+  reco_paused?: boolean // 조합발송 일시정지(true=발급·문자 중단). 일시정지 유료회원 문자 정지용(현장 6/26)
 }
 
 /** 회원별 발송 설정/홈페이지 비번 등(member.meta) 갱신. */

@@ -94,10 +94,12 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const [issueCount, setIssueCount] = useState('') // 수동 발급 세트 수
   const [issueSms, setIssueSms] = useState(false) // 수동 발급 시 문자 발송 여부
   const [confirmSuspend, setConfirmSuspend] = useState(false)
-  // 회원 설정(조합발송요일/갯수/홈페이지 비번)
+  // 회원 설정(조합발송요일/갯수/홈페이지 비번/종료일/일시정지)
   const [sendDay, setSendDay] = useState('')
   const [sendCount, setSendCount] = useState('')
   const [hpPw, setHpPw] = useState('')
+  const [endDate, setEndDate] = useState('') // 종료일(YYYY-MM-DD) override, 빈값=결제 종료일 사용
+  const [recoPaused, setRecoPaused] = useState(false) // 조합발송 일시정지
   // 결제 요청
   const [payProduct, setPayProduct] = useState('')
   const [payMethod, setPayMethod] = useState<PaymentMethod>('bank')
@@ -111,6 +113,8 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     setSendDay(d === null ? '' : String(d))
     setSendCount(c === null ? '' : String(c))
     setHpPw(metaStr(member?.meta, 'homepage_pw'))
+    setEndDate(metaStr(member?.meta, 'end_date').slice(0, 10))
+    setRecoPaused(member?.meta?.reco_paused === true)
     setPayProduct('')
     setPayMethod('bank')
     setPayAmount('')
@@ -127,6 +131,17 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     for (const s of staff) m[s.id] = s.name
     return m
   }, [staff])
+
+  // 종료일 = meta.end_date(수정 override) → 없으면 승인결제의 최신 period_end (현장 6/26)
+  const paidEnd = useMemo(() => {
+    const ends = payments
+      .filter((p) => p.status === 'approved' && p.period_end)
+      .map((p) => p.period_end as string)
+      .sort()
+    return ends.length ? ends[ends.length - 1] : null
+  }, [payments])
+  const endOverride = metaStr(member?.meta, 'end_date')
+  const effEnd = endOverride || paidEnd
   const teamName = useMemo(() => {
     const m: Record<string, string> = {}
     for (const t of teams) m[t.id] = t.name
@@ -282,6 +297,11 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
           <Row label="가입일시" mono>
             {datetime(member.registered_at)}
           </Row>
+          <Row label="종료일" mono>
+            {effEnd ? date(effEnd) : '-'}
+            {recoPaused && <span className="ml-1.5 text-[10px] font-semibold text-danger">일시정지</span>}
+            {endOverride && <span className="ml-1 text-[10px] text-amber-600">(수정됨)</span>}
+          </Row>
           <Row label="최근접속" mono>
             {member.last_active_at ? datetime(member.last_active_at) : '미접속'}
           </Row>
@@ -321,6 +341,30 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                 onChange={(e) => setSendCount(e.target.value.replace(/\D/g, ''))}
               />
             </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold text-gray-500">
+                종료일 <span className="font-normal text-gray-400">(비우면 결제 종료일)</span>
+              </span>
+              <input
+                type="date"
+                className={selectCls + ' w-full'}
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </label>
+            <label className="flex items-end gap-2 pb-1.5 text-[12px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={recoPaused}
+                onChange={(e) => setRecoPaused(e.target.checked)}
+              />
+              <span>
+                조합발송 일시정지
+                <span className="ml-1 block text-[10.5px] font-normal text-gray-400">
+                  체크 시 자동조합 발급·문자 중단
+                </span>
+              </span>
+            </label>
             <div className="col-span-2 flex items-end justify-end">
               <Button
                 size="sm"
@@ -332,6 +376,8 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
                     patch: {
                       weekly_reco_day: sendDay === '' ? null : Number(sendDay),
                       weekly_reco_count: sendCount === '' ? null : Number(sendCount),
+                      end_date: endDate === '' ? null : endDate,
+                      reco_paused: recoPaused,
                     },
                   })
                 }

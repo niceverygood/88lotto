@@ -473,3 +473,9 @@
 - **재발송**: 막힌 1,488건 본문 보존 재발송(동시성10) → **1,487 성공 / 1 결번**. 이윤선 1,883 중 1,882 도달. (테스트 1건 cmid 85432309 선검증.)
 - **화요일 정기**: 전체 **1,985명** weekly_reco_day=2(화)·count=10 설정 → 다음 화 09:00부터 매주 자동발송(파싱된 크론 동시성12 + hybrid 25만건으로 처리량 확보).
 - **교훈**: 발신번호/발송IP 변경 시 OneShot 재등록 필수. 로또문자 받아주는 업체(OneShot) 유지가 자산 — 업체 교체보다 IP 한도 해결이 정답.
+
+### D74. 회원정보창 종료일 표시·수정 + 조합발송 일시정지 (현장 6/26, 정의현 차장)
+- **① 종료일 표시**: MemberDrawer 기본정보에 '종료일' Row 추가. 종료일 = `meta.end_date`(수정 override) → 없으면 승인결제의 최신 `period_end`. (회원 레벨 종료일 필드가 없어 결제 period_end 파생 + meta override 구조.)
+- **② 조합발송 일시정지**: 차장 질문("발송갯수 0이면 문자 나가나?") → 기존 크론 `count>0 ? count : baseCount` 라 **0이면 전역기본(30)으로 발송됨(차단 안 됨)**. → 별도 일시정지 추가. MemberDrawer 회원설정에 '조합발송 일시정지' 체크박스(`meta.reco_paused`). 크론: `is_suspended=false` 필터(정지회원 제외) + `meta.reco_paused===true || weekly_reco_count===0` skip(0=중단 직관 반영).
+- **③ 종료일 수정**: 회원설정에 종료일 date input → `meta.end_date` 저장(updateMemberMeta 병합). 빈값=결제 종료일 사용.
+- `MemberSettingsPatch` 에 `end_date?`, `reco_paused?` 추가. 검증: 빌드·크론 tsc 통과.
