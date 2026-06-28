@@ -103,6 +103,49 @@ export default async function handler(req: any, res: any) {
     }
     const { error } = await sb.from('lotto_rounds').upsert(rows, { onConflict: 'round_no' })
     if (error) throw error
+
+    // 추천조합 당첨 집계 — 새로 적재된 회차별로 회원 추천번호(meta.weekly_recos)를 당첨번호와 대조해 win_history 갱신.
+    // 실서비스는 베팅이 아니라 추천조합 발급이라, 이 집계가 '당첨자' 세그먼트의 실질 기준(현장 6/29).
+    const gRank = (combo: number[], win: number[], bonus: number): number | null => {
+      const w = new Set(win)
+      const m = combo.reduce((c, n) => (w.has(n) ? c + 1 : c), 0)
+      if (m === 6) return 1
+      if (m === 5) return combo.includes(bonus) ? 2 : 3
+      if (m === 4) return 4
+      if (m === 3) return 5
+      return null
+    }
+    const mem: { id: string; meta: Record<string, unknown> | null }[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data: md } = await sb.from('members').select('id, meta').eq('is_deleted', false).range(from, from + 999)
+      const pg = (md ?? []) as typeof mem
+      mem.push(...pg)
+      if (pg.length < 1000) break
+    }
+    let tallied = 0
+    for (const row of rows) {
+      for (const m of mem) {
+        const recos = Array.isArray(m.meta?.weekly_recos)
+          ? (m.meta!.weekly_recos as { round_no: number; sets: number[][] }[])
+          : []
+        const issue = recos.find((x) => x.round_no === row.round_no)
+        if (!issue) continue
+        let best: number | null = null
+        let wins = 0
+        for (const set of issue.sets) {
+          const rk = gRank(set, row.numbers, row.bonus)
+          if (rk != null) {
+            wins += 1
+            if (best === null || rk < best) best = rk
+          }
+        }
+        if (best != null) {
+          await sb.from('members').update({ win_history: `${row.round_no}회 ${best}등${wins > 1 ? ` (${wins}건)` : ''}` }).eq('id', m.id)
+          tallied += 1
+        }
+      }
+    }
+
     await sb.from('logs').insert({
       id: `log_lotto_${Date.now().toString(36)}`,
       kind: 'admin',
@@ -110,10 +153,10 @@ export default async function handler(req: any, res: any) {
       action: 'lotto.auto_sync',
       target_type: 'lotto_round',
       target_id: null,
-      meta: { added: rows.length, skipped, rounds: rows.map((x) => x.round_no), maxBefore: maxRound },
+      meta: { added: rows.length, skipped, rounds: rows.map((x) => x.round_no), maxBefore: maxRound, winners: tallied },
       created_at: new Date().toISOString(),
     })
-    return res.status(200).json({ ok: true, maxRound, added: rows.length, skipped, rounds: rows.map((x) => x.round_no) })
+    return res.status(200).json({ ok: true, maxRound, added: rows.length, skipped, rounds: rows.map((x) => x.round_no), winners: tallied })
   } catch (e) {
     return res.status(500).json({ ok: false, code: 'ERROR', message: e instanceof Error ? e.message : String(e) })
   }

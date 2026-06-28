@@ -4,7 +4,7 @@
 //   회차 등록 → 중복 검사 후 미확정 회차 추가 + 로그
 // 회차/베팅은 전역 데이터(RLS 스코프 없음). 읽기(useRounds)는 fetchTables 스냅샷으로 재사용.
 // TODO(live-verify): 회차 베팅 채점은 행 단위 update — 대량 회차는 RPC(set-based)로 이관 권장.
-import type { Bet, Grade, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
+import type { Bet, Grade, LottoRound, Member, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { nowIso } from '@/lib/db/store'
 import { insertLog, fetchSiteSettings, sb, selectAll } from '@/lib/db/remote'
 import { gradeRank, lottoSum, oddEven, prizeForRank } from '@/lib/lotto'
@@ -49,6 +49,33 @@ export async function confirmRound(roundNo: number, actor: string | null): Promi
         .update({ win_history: `${roundNo}회 ${rank}등` })
         .eq('id', bet.member_ref)
       if (me) throw me
+    }
+  }
+
+  // 추천조합(weekly_recos) 당첨 집계 — 회원이 받은 추천번호를 당첨번호와 대조해 win_history 갱신(현장 6/29).
+  // 실제 서비스는 베팅이 아니라 추천조합 발급이라, 이 집계가 '당첨자' 세그먼트의 실질 기준이다.
+  const members = await selectAll<Member>('members')
+  for (const m of members) {
+    const meta = m.meta ?? {}
+    const recos = Array.isArray(meta.weekly_recos) ? (meta.weekly_recos as WeeklyRecoIssue[]) : []
+    const issue = recos.find((x) => x.round_no === roundNo)
+    if (!issue) continue
+    let best: number | null = null
+    let wins = 0
+    for (const set of issue.sets) {
+      const rk = gradeRank(set, round.numbers, round.bonus)
+      if (rk != null) {
+        wins += 1
+        if (best === null || rk < best) best = rk
+      }
+    }
+    if (best != null) {
+      winners += 1
+      const { error: we } = await sb()
+        .from('members')
+        .update({ win_history: `${roundNo}회 ${best}등${wins > 1 ? ` (${wins}건)` : ''}` })
+        .eq('id', m.id)
+      if (we) throw we
     }
   }
 

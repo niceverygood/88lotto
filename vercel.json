@@ -3,7 +3,7 @@
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "functions": {
     "api/weekly-reco.ts": { "maxDuration": 300 },
-    "api/weekly-lotto-sync.ts": { "maxDuration": 60 },
+    "api/weekly-lotto-sync.ts": { "maxDuration": 300 },
     "api/send-sms.ts": { "maxDuration": 30 }
   },
   "crons": [
