@@ -495,3 +495,9 @@
 ### D76. 종료일 기본값 = 결제일(없으면 가입일)+1년 (현장 6/29)
 - MemberDrawer 종료일: 기존 'meta.end_date || 결제 period_end' → **'meta.end_date(override) || (최신 승인결제 paid_at, 없으면 registered_at) + 1년'**. 수정창도 그 값으로 기본 프리필(payments 로드 후). 라벨 '(기본 결제일+1년)'.
 - 참고(현장 질문): 전산↔홈페이지는 이미 연결됨 — 고객 포털 `/portal`(전화+뒷4자리 로그인 → 본인 weekly_recos 조회, `portal_member_recos` RPC, 동일 Supabase). 전산이 발급하면 포털에서 즉시 조회.
+
+### D76. 고객 홈페이지(/portal) 신설 — 회원 로그인·내 추천번호·등급/회차/공지 (현장 6/29)
+- **요구(정의현 차장)**: "전산과 홈페이지가 연동되어야 하고, 회원이 로그인해서 본인등급/발급번호를 확인할 수 있어야 함"(일행로또 ilhanglotto.co.kr 참고). 88로또(88lotto.co.kr) 회원용 홈페이지 필요.
+- **구현**: `src/features/site/` 신설 — SiteLayout(헤더/푸터/네비) + MemberAuthProvider(staff 인증과 분리, 전화+비번) + 8페이지: 홈/88시스템/88로또자료/88멤버십/마이페이지/로그인/회원가입/고객센터. 라우트 `/portal/*`. admin(`/`)·기존 코드 무수정.
+- **데이터**: 회원 로그인·추천번호 조회는 `portal_member_recos` RPC(security definer)라 anon 정상. 회차/공지/FAQ 읽기·문의 접수는 anon 차단(0002 RLS=authenticated) → **0007_public_site_anon.sql 로 anon 공개 SELECT(lotto_rounds/notices·faqs published) + inquiries INSERT 정책 추가 필요**. 셀프 가입은 members INSERT 불가(RLS+트리거)라 inquiries(가입문의)로 접수→운영자 후처리.
+- 검증: 빌드·tsc 통과. 라이브 렌더는 배포 후 확인.

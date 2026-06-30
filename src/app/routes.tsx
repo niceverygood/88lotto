@@ -25,7 +25,17 @@ import { ReportSettingsPage } from '@/features/settings/ReportSettingsPage'
 import { LottoExcludePage } from '@/features/settings/LottoExcludePage'
 import { TermsSettingsPage } from '@/features/settings/TermsSettingsPage'
 import { ComponentsPage } from '@/features/dev/ComponentsPage'
-import { PortalPage } from '@/features/portal/PortalPage'
+// 기존 단일 PortalPage(/portal) 는 새 SiteHomePage(로그인/마이페이지로 기능 흡수)로 대체됨.
+import { MemberAuthProvider } from '@/features/site/auth'
+import { SiteLayout } from '@/features/site/SiteLayout'
+import { HomePage as SiteHomePage } from '@/features/site/HomePage'
+import { SystemPage as SiteSystemPage } from '@/features/site/SystemPage'
+import { DataPage as SiteDataPage } from '@/features/site/DataPage'
+import { MembershipPage as SiteMembershipPage } from '@/features/site/MembershipPage'
+import { MyPage as SiteMyPage } from '@/features/site/MyPage'
+import { LoginPage as SiteLoginPage } from '@/features/site/LoginPage'
+import { SignupPage as SiteSignupPage } from '@/features/site/SignupPage'
+import { SupportPage as SiteSupportPage } from '@/features/site/SupportPage'
 import { useRole } from '@/lib/auth'
 
 // 랜딩 분기(현장 피드백 6/11): 팀장(rep)은 메뉴가 이용자·나의고객뿐이라 /members 로 보낸다.
@@ -43,8 +53,25 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      {/* 고객 홈페이지(공개) — 전화번호/뒷4자리 로그인, 본인 발급번호 조회(현장 피드백) */}
-      <Route path="/portal" element={<PortalPage />} />
+      {/* 고객 홈페이지(공개) — 전화번호/뒷4자리 로그인, 본인 발급번호 조회(현장 피드백).
+          /portal 레이아웃 라우트: MemberAuthProvider(staff 인증과 분리) + SiteLayout(<Outlet/>). */}
+      <Route
+        path="/portal"
+        element={
+          <MemberAuthProvider>
+            <SiteLayout />
+          </MemberAuthProvider>
+        }
+      >
+        <Route index element={<SiteHomePage />} />
+        <Route path="system" element={<SiteSystemPage />} />
+        <Route path="data" element={<SiteDataPage />} />
+        <Route path="membership" element={<SiteMembershipPage />} />
+        <Route path="mypage" element={<SiteMyPage />} />
+        <Route path="login" element={<SiteLoginPage />} />
+        <Route path="signup" element={<SiteSignupPage />} />
+        <Route path="support" element={<SiteSupportPage />} />
+      </Route>
       <Route
         element={
           <RequireAuth>
