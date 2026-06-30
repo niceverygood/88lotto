@@ -20,9 +20,21 @@ export async function saveSiteSettings(next: SiteSettings, actor: string | null)
     weekly_free_reco: next.weekly_free_reco,
     terms: next.terms,
     terms_by_grade: next.terms_by_grade,
+    membership_tiers: next.membership_tiers ?? [],
   }
   const { error } = await sb().from('site_settings').update(payload).eq('id', 1)
-  if (error) throw error
+  if (error) {
+    // membership_tiers 컬럼 마이그레이션(0008) 전이면 PGRST204 → 그 키만 빼고 재시도해
+    // 다른 설정 저장(무통장·약관 등)이 통째로 막히지 않게 한다(D68 방어구조 유지).
+    if (String(error.message).includes('membership_tiers')) {
+      const fallback = { ...payload }
+      delete (fallback as Record<string, unknown>).membership_tiers
+      const retry = await sb().from('site_settings').update(fallback).eq('id', 1)
+      if (retry.error) throw retry.error
+    } else {
+      throw error
+    }
+  }
   await insertLog({
     kind: 'admin',
     actor,

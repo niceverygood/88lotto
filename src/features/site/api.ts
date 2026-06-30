@@ -18,9 +18,10 @@
 //   InquiryInput = { name:string; phone?:string; category?:string; title:string; body:string }
 // ─────────────────────────────────────────────────────────────────────────
 import { useMutation, useQuery, type UseQueryResult } from '@tanstack/react-query'
-import type { Faq, LottoRound, Notice } from '@/types/db'
+import type { Faq, LottoRound, MembershipTier, Notice } from '@/types/db'
 import { dataSource, supabase } from '@/lib/supabase'
 import { readDb } from '@/lib/db/store'
+import { resolveTiers } from '@/lib/membership'
 
 const digits = (s: string): string => s.replace(/\D/g, '')
 
@@ -28,6 +29,25 @@ export const siteKeys = {
   rounds: (n: number) => ['site', 'rounds', n] as const,
   notices: () => ['site', 'notices'] as const,
   faqs: () => ['site', 'faqs'] as const,
+  tiers: () => ['site', 'membership-tiers'] as const,
+}
+
+// ── 멤버십 등급(전산 편집 → 고객 연동) ─────────────────────────────────────
+// site_settings 에는 PG api_key 비밀이 같이 있어 anon 직접 읽기 금지 → security-definer
+// RPC portal_membership_tiers() 가 membership_tiers 컬럼만 반환(0008 마이그레이션). 항상 5개로 정규화.
+export function useMembershipTiers(): UseQueryResult<MembershipTier[]> {
+  return useQuery({
+    queryKey: siteKeys.tiers(),
+    queryFn: async (): Promise<MembershipTier[]> => {
+      if (dataSource === 'supabase' && supabase) {
+        const { data, error } = await supabase.rpc('portal_membership_tiers')
+        if (error || !data) return resolveTiers(null) // RPC 미생성/차단 → 코드 기본값
+        return resolveTiers(data as MembershipTier[])
+      }
+      return resolveTiers(readDb().site_settings.membership_tiers)
+    },
+    staleTime: 10 * 60 * 1000,
+  })
 }
 
 // ── 최근 회차(자료 페이지) ────────────────────────────────────────────────

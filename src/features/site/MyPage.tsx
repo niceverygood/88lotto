@@ -24,6 +24,7 @@ import { datetime, phone as fmtPhone } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { Grade, WeeklyRecoIssue } from '@/types/db'
 import { useMemberAuth } from './auth'
+import { useMembershipTiers } from './api'
 
 // 유료 등급 집합 — 발급번호/이용권 안내 분기에 사용.
 const PAID_GRADES = new Set<Grade>(['gold', 'goldp', 'vip', 'royal'])
@@ -197,6 +198,10 @@ function NoRecos({ grade }: { grade: Grade }) {
 // ── 페이지 본체 ─────────────────────────────────────────────────────────────
 export function MyPage() {
   const { member, loading } = useMemberAuth()
+  const { data: tiers } = useMembershipTiers()
+  // 등급 명칭은 전산 편집값(멤버십 등급)을 우선 사용. 미편집/미노출 등급은 코드 기본 라벨.
+  const gradeLabel = (g: Grade): string =>
+    tiers?.find((t) => t.grade === g)?.label ?? GRADE_LABEL[g]
 
   // 회차 내림차순 정렬(최근 회차 먼저). member 없으면 빈 배열.
   const sortedRecos = useMemo<WeeklyRecoIssue[]>(() => {
@@ -232,7 +237,7 @@ export function MyPage() {
                   {member.name}
                   <span className="text-[15px] font-bold text-gray-400"> 님</span>
                 </h1>
-                <Badge grade={member.grade} />
+                <Badge grade={member.grade}>{gradeLabel(member.grade)}</Badge>
               </div>
               <p className="mt-1 flex items-center gap-1.5 text-[13px] text-gray-500">
                 <Phone className="h-3.5 w-3.5" />
@@ -250,7 +255,7 @@ export function MyPage() {
             {paid ? (
               <>
                 <p className="mt-1.5 text-[14px] font-bold text-ink-900">
-                  {GRADE_LABEL[member.grade]} 멤버십 이용 중
+                  {gradeLabel(member.grade)} 멤버십 이용 중
                 </p>
                 <p className="mt-1 text-[12.5px] leading-relaxed text-gray-500">
                   {latestIssued ? (
@@ -277,7 +282,7 @@ export function MyPage() {
             ) : (
               <>
                 <p className="mt-1.5 text-[14px] font-bold text-ink-900">
-                  {GRADE_LABEL[member.grade]} 회원
+                  {gradeLabel(member.grade)} 회원
                 </p>
                 <p className="mt-1 text-[12.5px] leading-relaxed text-gray-500">
                   멤버십을 시작하시면 회차별 추천 번호를 받아보실 수 있습니다.

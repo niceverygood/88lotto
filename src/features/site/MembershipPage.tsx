@@ -2,197 +2,52 @@
 // 88로또 고객 홈페이지 — 88멤버십 (등급 안내) 페이지 (/portal/membership)
 // ─────────────────────────────────────────────────────────────────────────
 // 무료/골드/골드플러스/VIP/로얄 등급의 혜택을 비교하는 마케팅·안내 페이지.
-// 등급 색은 전부 grade-* 토큰(임의 hex 금지). 가격은 "문의" placeholder.
-// 로그인 시 본인 등급을 상단에 하이라이트하고, 비로그인 시 가입/문의 CTA 노출.
+// 등급 카드(명칭·가격·태그라인·혜택·개별약관)는 전산(설정 > 멤버십 등급)에서 편집 →
+//   security-definer RPC(useMembershipTiers)로 연동. 운영 미편집 시 코드 기본값 폴백.
+// 등급 색은 전부 grade-* 토큰(임의 hex 금지).
 //
 // ※ 이 파일은 <SiteLayout/> 의 <Outlet/> 안에 렌더되므로 "본문 콘텐츠"만 반환한다.
-//   (SiteLayout 을 import 하지 않는다.) 라우트 등록은 Phase3 담당.
-//
-// TODO(live-verify): 등급별 실제 혜택(주간 조합수·문자·분석 범위)·가격은 운영 확정 후 교체.
 // ─────────────────────────────────────────────────────────────────────────
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, Crown, Headphones, Minus, Sparkles } from 'lucide-react'
-import type { Grade } from '@/types/db'
-import { GRADE_LABEL } from '@/design-system/labels'
+import { Check, Crown, FileText, Headphones, Minus, Sparkles } from 'lucide-react'
+import type { Grade, MembershipTier } from '@/types/db'
 import { Badge } from '@/design-system/components'
 import { cn } from '@/lib/cn'
+import { DEFAULT_MEMBERSHIP_TIERS, TIER_GRADES, type TierGrade } from '@/lib/membership'
 import { useMemberAuth } from './auth'
+import { useMembershipTiers } from './api'
 
 // ── 등급별 색 토큰 매핑 (Badge 와 동일한 grade-* 토큰만 사용) ───────────────
 const GRADE_TONE: Record<
   Grade,
   { text: string; dot: string; ring: string; soft: string; bar: string }
 > = {
-  free: {
-    text: 'text-grade-free',
-    dot: 'bg-grade-free',
-    ring: 'ring-grade-free/30',
-    soft: 'bg-grade-free-bg',
-    bar: 'bg-grade-free',
-  },
-  simple: {
-    text: 'text-grade-simple',
-    dot: 'bg-grade-simple',
-    ring: 'ring-grade-simple/30',
-    soft: 'bg-grade-simple-bg',
-    bar: 'bg-grade-simple',
-  },
-  gold: {
-    text: 'text-grade-gold',
-    dot: 'bg-grade-gold',
-    ring: 'ring-grade-gold/40',
-    soft: 'bg-grade-gold-bg',
-    bar: 'bg-grade-gold',
-  },
-  goldp: {
-    text: 'text-grade-goldp',
-    dot: 'bg-grade-goldp',
-    ring: 'ring-grade-goldp/40',
-    soft: 'bg-grade-goldp-bg',
-    bar: 'bg-grade-goldp',
-  },
-  vip: {
-    text: 'text-grade-vip',
-    dot: 'bg-grade-vip',
-    ring: 'ring-grade-vip/40',
-    soft: 'bg-grade-vip-bg',
-    bar: 'bg-grade-vip',
-  },
-  royal: {
-    text: 'text-grade-royal',
-    dot: 'bg-grade-royal',
-    ring: 'ring-grade-royal/40',
-    soft: 'bg-grade-royal-bg',
-    bar: 'bg-grade-royal',
-  },
-  ovr: {
-    text: 'text-grade-ovr',
-    dot: 'bg-grade-ovr',
-    ring: 'ring-grade-ovr/30',
-    soft: 'bg-grade-ovr-bg',
-    bar: 'bg-grade-ovr',
-  },
-  toss: {
-    text: 'text-grade-toss',
-    dot: 'bg-grade-toss',
-    ring: 'ring-grade-toss/30',
-    soft: 'bg-grade-toss-bg',
-    bar: 'bg-grade-toss',
-  },
+  free: { text: 'text-grade-free', dot: 'bg-grade-free', ring: 'ring-grade-free/30', soft: 'bg-grade-free-bg', bar: 'bg-grade-free' },
+  simple: { text: 'text-grade-simple', dot: 'bg-grade-simple', ring: 'ring-grade-simple/30', soft: 'bg-grade-simple-bg', bar: 'bg-grade-simple' },
+  gold: { text: 'text-grade-gold', dot: 'bg-grade-gold', ring: 'ring-grade-gold/40', soft: 'bg-grade-gold-bg', bar: 'bg-grade-gold' },
+  goldp: { text: 'text-grade-goldp', dot: 'bg-grade-goldp', ring: 'ring-grade-goldp/40', soft: 'bg-grade-goldp-bg', bar: 'bg-grade-goldp' },
+  vip: { text: 'text-grade-vip', dot: 'bg-grade-vip', ring: 'ring-grade-vip/40', soft: 'bg-grade-vip-bg', bar: 'bg-grade-vip' },
+  royal: { text: 'text-grade-royal', dot: 'bg-grade-royal', ring: 'ring-grade-royal/40', soft: 'bg-grade-royal-bg', bar: 'bg-grade-royal' },
+  ovr: { text: 'text-grade-ovr', dot: 'bg-grade-ovr', ring: 'ring-grade-ovr/30', soft: 'bg-grade-ovr-bg', bar: 'bg-grade-ovr' },
+  toss: { text: 'text-grade-toss', dot: 'bg-grade-toss', ring: 'ring-grade-toss/30', soft: 'bg-grade-toss-bg', bar: 'bg-grade-toss' },
 }
 
-// ── 페이지에 노출할 멤버십 등급(영업용) — simple/ovr/toss 는 내부 분류라 제외 ──
-type TierGrade = 'free' | 'gold' | 'goldp' | 'vip' | 'royal'
-const TIER_ORDER: TierGrade[] = ['free', 'gold', 'goldp', 'vip', 'royal']
-
-interface TierPlan {
-  grade: Grade
-  /** 한 줄 소개 */
-  tagline: string
-  /** 주간 발급 추천 조합 수(영업 안내용 추정값) */
-  weeklySets: string
-  /** 카드에 노출할 핵심 혜택 요약 */
-  highlights: string[]
-  /** 추천(강조) 등급 여부 */
-  featured?: boolean
-}
-
-// TODO(live-verify): 조합수/혜택 구성은 합리적 추정. 운영 확정 시 이 배열만 교체.
-const TIER_PLANS: Record<Grade, TierPlan> = {
-  free: {
-    grade: 'free',
-    tagline: '부담 없이 시작하는 무료 체험',
-    weeklySets: '주 1조합',
-    highlights: ['주간 추천 조합 1세트', '기본 회차 정보 열람', '마이페이지 발급내역 확인'],
-  },
-  gold: {
-    grade: 'gold',
-    tagline: '본격적인 번호 관리의 시작',
-    weeklySets: '주 5조합',
-    highlights: [
-      '주간 추천 조합 5세트',
-      '추천 번호 문자(SMS) 발송',
-      '회차별 당첨 집계 알림',
-      '기본 번호 분석 리포트',
-    ],
-  },
-  goldp: {
-    grade: 'goldp',
-    tagline: '더 많은 조합과 우선 발송',
-    weeklySets: '주 10조합',
-    highlights: [
-      '주간 추천 조합 10세트',
-      '추천 번호 문자(SMS) 우선 발송',
-      '회차별 당첨 집계 알림',
-      '심화 번호 분석 리포트',
-    ],
-    featured: true,
-  },
-  vip: {
-    grade: 'vip',
-    tagline: '전담 관리와 프리미엄 분석',
-    weeklySets: '주 20조합',
-    highlights: [
-      '주간 추천 조합 20세트',
-      'VIP 전용 분석 리포트',
-      '전담 상담원 1:1 관리',
-      '당첨 패턴 맞춤 컨설팅',
-    ],
-  },
-  royal: {
-    grade: 'royal',
-    tagline: '최상위 로얄 멤버 전용 혜택',
-    weeklySets: '주 30조합+',
-    highlights: [
-      '주간 추천 조합 30세트 이상',
-      '로얄 전용 프리미엄 분석',
-      '최우선 전담 컨설팅',
-      '특별 이벤트·당첨 케어',
-    ],
-  },
-  // 비노출(내부 분류) — 타입 완결성용 더미 항목
-  simple: { grade: 'simple', tagline: '간편가입', weeklySets: '-', highlights: [] },
-  ovr: { grade: 'ovr', tagline: '-', weeklySets: '-', highlights: [] },
-  toss: { grade: 'toss', tagline: '-', weeklySets: '-', highlights: [] },
-}
-
-// ── 등급 × 기능 비교 매트릭스 ──────────────────────────────────────────────
+// ── 등급 × 기능 비교 매트릭스 (값은 운영 표준 — 카드 혜택과 별개의 요약표) ──
 interface FeatureRow {
   label: string
-  /** 노출 등급별 값: true/false 또는 텍스트 */
   values: Record<TierGrade, boolean | string>
 }
 
 // TODO(live-verify): 비교 항목/값은 합리적 추정. 운영 확정 시 교체.
 const FEATURE_ROWS: FeatureRow[] = [
-  {
-    label: '주간 추천 조합 수',
-    values: { free: '1조합', gold: '5조합', goldp: '10조합', vip: '20조합', royal: '30조합+' },
-  },
-  {
-    label: '추천 번호 문자(SMS) 발송',
-    values: { free: false, gold: true, goldp: true, vip: true, royal: true },
-  },
-  {
-    label: '회차별 당첨 집계 알림',
-    values: { free: false, gold: true, goldp: true, vip: true, royal: true },
-  },
-  {
-    label: '번호 분석 리포트',
-    values: { free: false, gold: '기본', goldp: '심화', vip: '프리미엄', royal: '프리미엄+' },
-  },
-  {
-    label: '전담 상담원 1:1 관리',
-    values: { free: false, gold: false, goldp: false, vip: true, royal: true },
-  },
-  {
-    label: '맞춤 당첨 컨설팅',
-    values: { free: false, gold: false, goldp: false, vip: true, royal: true },
-  },
-  {
-    label: '특별 이벤트·당첨 케어',
-    values: { free: false, gold: false, goldp: false, vip: false, royal: true },
-  },
+  { label: '주간 추천 조합 수', values: { free: '1조합', gold: '5조합', goldp: '10조합', vip: '20조합', royal: '30조합+' } },
+  { label: '추천 번호 문자(SMS) 발송', values: { free: false, gold: true, goldp: true, vip: true, royal: true } },
+  { label: '회차별 당첨 집계 알림', values: { free: false, gold: true, goldp: true, vip: true, royal: true } },
+  { label: '번호 분석 리포트', values: { free: false, gold: '기본', goldp: '심화', vip: '프리미엄', royal: '프리미엄+' } },
+  { label: '전담 상담원 1:1 관리', values: { free: false, gold: false, goldp: false, vip: true, royal: true } },
+  { label: '맞춤 당첨 컨설팅', values: { free: false, gold: false, goldp: false, vip: true, royal: true } },
+  { label: '특별 이벤트·당첨 케어', values: { free: false, gold: false, goldp: false, vip: false, royal: true } },
 ]
 
 function CellValue({ value, tone }: { value: boolean | string; tone: string }) {
@@ -214,17 +69,17 @@ function CellValue({ value, tone }: { value: boolean | string; tone: string }) {
 }
 
 // ── 등급 카드 ──────────────────────────────────────────────────────────────
-function TierCard({ plan, isCurrent }: { plan: TierPlan; isCurrent: boolean }) {
-  const tone = GRADE_TONE[plan.grade]
+function TierCard({ tier, isCurrent }: { tier: MembershipTier; isCurrent: boolean }) {
+  const tone = GRADE_TONE[tier.grade]
   return (
     <div
       className={cn(
         'relative flex flex-col rounded-lg border bg-white p-5 shadow-sm transition',
-        plan.featured ? 'border-primary-200 ring-1 ring-primary-100' : 'border-gray-200',
+        tier.featured ? 'border-primary-200 ring-1 ring-primary-100' : 'border-gray-200',
         isCurrent && 'ring-2 ring-primary-400',
       )}
     >
-      {plan.featured && (
+      {tier.featured && (
         <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary-600 px-3 py-1 text-[11px] font-bold text-white shadow-sm">
           인기
         </span>
@@ -235,27 +90,28 @@ function TierCard({ plan, isCurrent }: { plan: TierPlan; isCurrent: boolean }) {
         </span>
       )}
 
-      {/* 상단 색 바 */}
       <span className={cn('mb-4 h-1 w-10 rounded-full', tone.bar)} />
 
       <div className="mb-1 flex items-center gap-2">
         <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', tone.dot)} />
-        <h3 className={cn('text-[18px] font-extrabold', tone.text)}>{GRADE_LABEL[plan.grade]}</h3>
+        <h3 className={cn('text-[18px] font-extrabold', tone.text)}>{tier.label}</h3>
       </div>
-      <p className="mb-4 text-[13px] leading-relaxed text-gray-500">{plan.tagline}</p>
+      <p className="mb-4 text-[13px] leading-relaxed text-gray-500">{tier.tagline}</p>
 
-      {/* 가격(문의 placeholder) */}
+      {/* 가격 */}
       <div className={cn('mb-4 rounded-md px-3 py-2.5', tone.soft)}>
         <div className="text-[11.5px] font-semibold text-gray-500">월 이용료</div>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-[20px] font-extrabold text-ink-900">문의</span>
-          <span className="text-[12px] font-medium text-gray-500">· {plan.weeklySets}</span>
+          <span className="text-[20px] font-extrabold text-ink-900">{tier.price}</span>
+          {tier.weekly_sets && (
+            <span className="text-[12px] font-medium text-gray-500">· {tier.weekly_sets}</span>
+          )}
         </div>
       </div>
 
       {/* 혜택 목록 */}
       <ul className="mb-5 flex flex-1 flex-col gap-2">
-        {plan.highlights.map((h) => (
+        {tier.highlights.map((h) => (
           <li key={h} className="flex items-start gap-2 text-[13px] leading-snug text-gray-700">
             <Check className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', tone.text)} />
             <span>{h}</span>
@@ -268,12 +124,12 @@ function TierCard({ plan, isCurrent }: { plan: TierPlan; isCurrent: boolean }) {
         to="/portal/support"
         className={cn(
           'mt-auto inline-flex items-center justify-center gap-1.5 rounded-[7px] px-3.5 py-2.5 text-[13px] font-bold transition',
-          plan.featured
+          tier.featured
             ? 'bg-primary-600 text-white hover:bg-primary-700'
             : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400',
         )}
       >
-        {plan.grade === 'free' ? '무료로 시작하기' : '가입 문의하기'}
+        {tier.grade === 'free' ? '무료로 시작하기' : '가입 문의하기'}
       </Link>
     </div>
   )
@@ -282,6 +138,14 @@ function TierCard({ plan, isCurrent }: { plan: TierPlan; isCurrent: boolean }) {
 export function MembershipPage() {
   const { member } = useMemberAuth()
   const currentGrade = member?.grade ?? null
+  const { data } = useMembershipTiers()
+  const tiers = data ?? DEFAULT_MEMBERSHIP_TIERS
+
+  const labelOf = useMemo(() => {
+    const m = new Map(tiers.map((t) => [t.grade, t.label]))
+    return (g: Grade): string | undefined => m.get(g)
+  }, [tiers])
+  const tiersWithTerms = tiers.filter((t) => t.terms.trim())
 
   return (
     <div className="font-sans">
@@ -306,7 +170,7 @@ export function MembershipPage() {
               <span className="text-[13px] text-gray-200">
                 <span className="font-bold text-white">{member.name}</span>님의 현재 등급
               </span>
-              <Badge grade={member.grade} />
+              <Badge grade={member.grade}>{labelOf(member.grade)}</Badge>
             </div>
           ) : (
             <div className="mt-6 flex flex-wrap gap-2.5">
@@ -340,8 +204,8 @@ export function MembershipPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {TIER_ORDER.map((g) => (
-            <TierCard key={g} plan={TIER_PLANS[g]} isCurrent={currentGrade === g} />
+          {tiers.map((t) => (
+            <TierCard key={t.grade} tier={t} isCurrent={currentGrade === t.grade} />
           ))}
         </div>
 
@@ -357,7 +221,7 @@ export function MembershipPage() {
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
                   <th className="px-4 py-3 text-[12.5px] font-bold text-gray-600">혜택 항목</th>
-                  {TIER_ORDER.map((g) => {
+                  {TIER_GRADES.map((g) => {
                     const tone = GRADE_TONE[g]
                     const isCurrent = currentGrade === g
                     return (
@@ -371,7 +235,7 @@ export function MembershipPage() {
                       >
                         <span className="inline-flex items-center gap-1.5">
                           <span className={cn('h-2 w-2 rounded-full', tone.dot)} />
-                          {GRADE_LABEL[g]}
+                          {labelOf(g) ?? g}
                         </span>
                       </th>
                     )
@@ -384,10 +248,8 @@ export function MembershipPage() {
                     key={row.label}
                     className={cn('border-b border-gray-100', i % 2 === 1 && 'bg-gray-50/40')}
                   >
-                    <td className="px-4 py-3 text-[13px] font-semibold text-gray-700">
-                      {row.label}
-                    </td>
-                    {TIER_ORDER.map((g) => {
+                    <td className="px-4 py-3 text-[13px] font-semibold text-gray-700">{row.label}</td>
+                    {TIER_GRADES.map((g) => {
                       const tone = GRADE_TONE[g]
                       const isCurrent = currentGrade === g
                       return (
@@ -410,6 +272,36 @@ export function MembershipPage() {
             안내드립니다.
           </p>
         </div>
+
+        {/* ── 등급별 개별약관 (전산 편집) ────────────────────── */}
+        {tiersWithTerms.length > 0 && (
+          <div className="mt-14">
+            <h2 className="text-[22px] font-extrabold text-ink-900">등급별 이용약관</h2>
+            <p className="mt-1 text-[13.5px] text-gray-500">
+              각 등급의 개별약관서입니다. 가입 전 반드시 확인해 주세요.
+            </p>
+            <div className="mt-4 space-y-2.5">
+              {tiersWithTerms.map((t) => {
+                const tone = GRADE_TONE[t.grade]
+                return (
+                  <details key={t.grade} className="group rounded-lg border border-gray-200 bg-white shadow-sm">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-[14px] font-bold text-ink-900">
+                      <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', tone.dot)} />
+                      <FileText className={cn('h-4 w-4', tone.text)} />
+                      {t.label} 개별약관서
+                      <span className="ml-auto text-[12px] font-medium text-gray-400 group-open:hidden">
+                        펼치기
+                      </span>
+                    </summary>
+                    <div className="whitespace-pre-wrap border-t border-gray-100 px-4 py-3.5 text-[12.5px] leading-relaxed text-gray-600">
+                      {t.terms}
+                    </div>
+                  </details>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ── 하단 CTA ──────────────────────────────────────── */}
         <div className="mt-14 rounded-lg border border-gray-200 bg-white p-6 shadow-sm sm:p-8">

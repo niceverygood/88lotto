@@ -21,6 +21,7 @@ import { LogsPage } from '@/features/logs/LogsPage'
 import { StatsPage } from '@/features/stats/StatsPage'
 import { SettingsLayout } from '@/features/settings/SettingsLayout'
 import { SiteSettingsPage } from '@/features/settings/SiteSettingsPage'
+import { MembershipSettingsPage } from '@/features/settings/MembershipSettingsPage'
 import { ReportSettingsPage } from '@/features/settings/ReportSettingsPage'
 import { LottoExcludePage } from '@/features/settings/LottoExcludePage'
 import { TermsSettingsPage } from '@/features/settings/TermsSettingsPage'
@@ -99,6 +100,7 @@ export function AppRoutes() {
         <Route path="/stats" element={<RequireNav navKey="stats"><StatsPage /></RequireNav>} />
         <Route path="/settings" element={<RequireNav navKey="settings"><SettingsLayout /></RequireNav>}>
           <Route index element={<SiteSettingsPage />} />
+          <Route path="membership" element={<MembershipSettingsPage />} />
           <Route path="report" element={<ReportSettingsPage />} />
           <Route path="lotto-exclude" element={<LottoExcludePage />} />
           <Route path="terms" element={<TermsSettingsPage />} />

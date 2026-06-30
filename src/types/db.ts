@@ -292,6 +292,20 @@ export interface WeeklyRecoIssue {
   sets: number[][] // 각 6/45 오름차순
 }
 
+// 멤버십 등급 카드(고객 멤버십 페이지) — 전산에서 운영자가 직접 편집(명칭·가격·혜택·약관). 현장 6/30.
+// 공개 안전 필드만(비밀 없음) → security-definer RPC portal_membership_tiers() 로 anon 공개.
+// label 은 전산 GRADE_LABEL 로도 전파(등급명 전역 변경, 6/30 정의현 차장).
+export interface MembershipTier {
+  grade: Grade // 노출 등급(free/gold/goldp/vip/royal). simple/ovr/toss 는 미노출.
+  label: string // 등급 명칭(편집 가능, 예: 골드플러스→88마스터)
+  price: string // 월 이용료 표시 텍스트(예: '문의' 또는 '490,000원')
+  tagline: string // 한 줄 소개
+  weekly_sets: string // 주간 조합 수 표시(예: '주 5조합')
+  highlights: string[] // 카드 혜택 목록
+  featured: boolean // '인기' 뱃지 강조
+  terms: string // 등급별 개별약관(개별약관서) — 비우면 미노출
+}
+
 export interface SiteSettings {
   bank: BankTransferSettings
   grade_colors: GradeColorMap
@@ -304,4 +318,5 @@ export interface SiteSettings {
   weekly_free_reco: WeeklyFreeRecoSettings // 무료회원 주간 자동발급(현장 피드백)
   terms: string // 이용약관 본문(공통/기본)
   terms_by_grade?: Partial<Record<Grade, string>> // 등급별 약관(현장 피드백 6/11) — 미설정 등급은 공통 폴백
+  membership_tiers?: MembershipTier[] // 멤버십 등급 카드(전산 편집 → 고객 연동, 6/30) — 미설정 시 코드 기본값 폴백
 }

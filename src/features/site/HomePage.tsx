@@ -21,13 +21,12 @@ import {
   Trophy,
   Users,
 } from 'lucide-react'
-import type { Grade } from '@/types/db'
 import { Badge, LottoBalls } from '@/design-system/components'
-import { GRADE_LABEL } from '@/design-system/labels'
 import { date } from '@/lib/format'
 import { cn } from '@/lib/cn'
+import { DEFAULT_MEMBERSHIP_TIERS } from '@/lib/membership'
 import { useMemberAuth } from './auth'
-import { useRecentRounds } from './api'
+import { useMembershipTiers, useRecentRounds } from './api'
 
 // ── 3대 강점 정의 ──────────────────────────────────────────────────────────
 interface Strength {
@@ -54,19 +53,7 @@ const STRENGTHS: Strength[] = [
   },
 ]
 
-// ── 등급 미리보기 정의 (멤버십 안내 요약) ──────────────────────────────────
-interface GradePreview {
-  grade: Grade
-  blurb: string
-}
-
-const GRADE_PREVIEW: GradePreview[] = [
-  { grade: 'free', blurb: '기본 추천번호 체험' },
-  { grade: 'gold', blurb: '주간 추천조합 정기 발급' },
-  { grade: 'goldp', blurb: '발급 조합 수 확대 + 당첨 안내' },
-  { grade: 'vip', blurb: '프리미엄 분석 + 우선 발송' },
-  { grade: 'royal', blurb: '최상위 전담 관리 서비스' },
-]
+// 등급 미리보기는 전산 편집 멤버십 등급(useMembershipTiers)에서 가져온다(명칭·소개 연동).
 
 // ── 작은 표시용 컴포넌트 ───────────────────────────────────────────────────
 function SectionHeading({
@@ -105,6 +92,8 @@ export function HomePage() {
   const cta = usePrimaryCta()
   const roundsQuery = useRecentRounds(1)
   const latest = roundsQuery.data?.[0]
+  const { data: tierData } = useMembershipTiers()
+  const tiers = tierData ?? DEFAULT_MEMBERSHIP_TIERS
 
   return (
     <div className="font-sans">
@@ -251,21 +240,19 @@ export function HomePage() {
         />
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {GRADE_PREVIEW.map((g) => (
+          {tiers.map((t) => (
             <div
-              key={g.grade}
+              key={t.grade}
               className={cn(
                 'flex flex-col rounded-xl border bg-white p-5 shadow-sm transition-shadow hover:shadow-md',
-                g.grade === 'vip' ? 'border-grade-vip/40' : 'border-gray-200',
+                t.featured ? 'border-grade-goldp/40' : 'border-gray-200',
               )}
             >
               <div className="mb-3">
-                <Badge grade={g.grade} />
+                <Badge grade={t.grade}>{t.label}</Badge>
               </div>
-              <div className="mb-1 text-[16px] font-extrabold text-ink-900">
-                {GRADE_LABEL[g.grade]}
-              </div>
-              <p className="text-[13px] leading-relaxed text-gray-500">{g.blurb}</p>
+              <div className="mb-1 text-[16px] font-extrabold text-ink-900">{t.label}</div>
+              <p className="text-[13px] leading-relaxed text-gray-500">{t.tagline}</p>
             </div>
           ))}
         </div>
