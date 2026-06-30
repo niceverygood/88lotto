@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// 88로또 고객 홈페이지 — 회원가입(가입 신청) 페이지 (/portal/signup)
+// 플러스로또 고객 홈페이지 — 회원가입(가입 신청) 페이지 (/portal/signup)
 // ─────────────────────────────────────────────────────────────────────────
 // signupApproach = "가입문의(inquiry) 폼".
 //   고객 사이트는 anon 키 → members 셀프 INSERT 불가(RLS+트리거). 그래서 셀프 가입이 아니라
@@ -92,10 +92,10 @@ export function SignupPage() {
         <section className="order-2 lg:order-1">
           <div className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1 text-[12.5px] font-bold text-primary-700">
             <ShieldCheck className="h-3.5 w-3.5" />
-            88로또 회원 신청
+            플러스로또 회원 신청
           </div>
           <h1 className="mt-4 text-[26px] font-extrabold leading-tight text-ink-900 sm:text-[30px]">
-            88<span className="text-accent-500">로또</span> 회원이 되어
+            플러스<span className="text-accent-500">로또</span> 회원이 되어
             <br />내 추천번호를 받아보세요
           </h1>
           <p className="mt-3 max-w-md text-[14px] leading-relaxed text-gray-500">

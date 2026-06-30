@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// 88로또 고객 홈페이지 — 공통 레이아웃 (Phase 1 공유 기반)
+// 플러스로또 고객 홈페이지 — 공통 레이아웃 (Phase 1 공유 기반)
 // ─────────────────────────────────────────────────────────────────────────
 // sticky 헤더(로고 + 네비 6개 + 로그인 상태별 우측 액션) + <Outlet/> + 푸터.
 // 데스크탑은 가로 네비, 모바일은 햄버거 토글. 브랜드 토큰만 사용(임의 hex 금지).
@@ -25,9 +25,9 @@ export interface SiteNavItem {
 /** 데스크탑/모바일 공통 네비 정의. */
 export const SITE_NAV: SiteNavItem[] = [
   { to: '/portal', label: '홈' },
-  { to: '/portal/system', label: '88시스템' },
-  { to: '/portal/data', label: '88로또자료' },
-  { to: '/portal/membership', label: '88멤버십' },
+  { to: '/portal/system', label: '플러스시스템' },
+  { to: '/portal/data', label: '플러스로또자료' },
+  { to: '/portal/membership', label: '플러스멤버십' },
   { to: '/portal/mypage', label: '마이페이지' },
   { to: '/portal/support', label: '고객센터' },
 ]
@@ -43,9 +43,9 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
 
 function BrandLogo() {
   return (
-    <Link to="/portal" className="flex shrink-0 items-center gap-1.5" aria-label="88로또 홈">
+    <Link to="/portal" className="flex shrink-0 items-center gap-1.5" aria-label="플러스로또 홈">
       <span className="text-[20px] font-extrabold leading-none tracking-tight text-ink-900">
-        88<span className="text-accent-500">로또</span>
+        플러스<span className="text-accent-500">로또</span>
       </span>
     </Link>
   )
@@ -201,7 +201,7 @@ export function SiteLayout() {
           <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="mb-2 text-[18px] font-extrabold text-ink-900">
-                88<span className="text-accent-500">로또</span>
+                플러스<span className="text-accent-500">로또</span>
               </div>
               <p className="max-w-md text-[13px] leading-relaxed text-gray-500">
                 본 서비스는 로또 번호 추천 정보 제공 서비스이며, 당첨을 보장하지 않습니다.
@@ -211,7 +211,7 @@ export function SiteLayout() {
             </div>
             <div className="text-[12.5px] leading-relaxed text-gray-400">
               {/* TODO(live-verify): 실제 상호/대표/사업자번호/주소/고객센터 번호로 교체 */}
-              <p>상호: 88로또 · 대표: -</p>
+              <p>상호: 플러스로또 · 대표: -</p>
               <p>사업자등록번호: ----- -----</p>
               <p>주소: -</p>
               <p>고객센터: -</p>
@@ -219,7 +219,7 @@ export function SiteLayout() {
           </div>
           <div className="mt-8 border-t border-gray-100 pt-5">
             <p className="text-[12px] text-gray-400">
-              © {new Date().getFullYear()} 88로또. All rights reserved.
+              © {new Date().getFullYear()} 플러스로또. All rights reserved.
             </p>
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-gray-400">
               도박 문제 상담: 한국도박문제예방치유원 국번없이 1336

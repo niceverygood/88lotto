@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// 88로또 고객 홈페이지 — 회원 인증 컨텍스트 (Phase 1 공유 기반)
+// 플러스로또 고객 홈페이지 — 회원 인증 컨텍스트 (Phase 1 공유 기반)
 // ─────────────────────────────────────────────────────────────────────────
 // 운영콘솔(staff) 인증과 완전히 분리된 "고객 회원" 세션. localStorage('site_member')에 보관.
 // 로그인은 PortalPage 의 portal_member_recos RPC(security definer) 로직을 그대로 재사용.
@@ -148,7 +148,7 @@ async function doSignup(input: SignupInput): Promise<AuthResult> {
     `이름: ${name}`,
     `연락처: ${d}`,
     input.memo?.trim() ? `메모: ${input.memo.trim()}` : null,
-    '경로: 88로또 홈페이지 가입문의',
+    '경로: 플러스로또 홈페이지 가입문의',
   ]
     .filter(Boolean)
     .join('\n')

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// 88로또 고객 홈페이지 — 88시스템 (/portal/system)
+// 플러스로또 고객 홈페이지 — 플러스시스템 (/portal/system)
 // ─────────────────────────────────────────────────────────────────────────
 // 서비스 동작 방식 소개 페이지. SiteLayout 의 <Outlet/> 안에 렌더되므로
 // "본문 콘텐츠"만 반환한다(레이아웃/헤더/푸터는 SiteLayout 담당, import 금지).
@@ -104,14 +104,14 @@ export function SystemPage() {
           <div className="max-w-2xl">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[12.5px] font-semibold text-accent-100">
               <Sparkles className="h-3.5 w-3.5" />
-              88시스템
+              플러스시스템
             </span>
             <h1 className="mt-4 text-[28px] font-extrabold leading-tight tracking-tight sm:text-[36px]">
               번호는 <span className="text-accent-500">선별</span>하고,
               <br className="hidden sm:block" /> 발급은 <span className="text-accent-500">자동</span>으로.
             </h1>
             <p className="mt-4 text-[15px] leading-relaxed text-gray-300 sm:text-[16px]">
-              88로또는 매주 회차마다 데이터 기반으로 추천 조합을 선별해 자동 발급하고,
+              플러스로또는 매주 회차마다 데이터 기반으로 추천 조합을 선별해 자동 발급하고,
               문자로 안내한 뒤 추첨 결과까지 집계해 드리는 로또 번호 추천 서비스입니다.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-3">
@@ -275,7 +275,7 @@ export function SystemPage() {
                 <b className="text-ink-900">
                   어떤 조합이든 1등에 당첨될 확률은 약 814만 5,060분의 1로 모두 동일
                 </b>
-                합니다. 88시스템의 번호 추천은 데이터를 바탕으로 조합을{' '}
+                합니다. 플러스시스템의 번호 추천은 데이터를 바탕으로 조합을{' '}
                 <b className="text-ink-900">선별</b>해 드리는 것일 뿐,{' '}
                 <b className="text-ink-900">당첨 확률을 높여 주지 않으며 당첨을 보장하지 않습니다.</b>
               </p>

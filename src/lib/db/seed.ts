@@ -224,8 +224,8 @@ function genSupport(rng: Rng, members: Member[]) {
         template_key: isJoin ? 'join' : 'recommend',
         phone: m.phone,
         body: isJoin
-          ? `[88로또] ${m.name}님 가입을 환영합니다.`
-          : `[88로또] ${m.name}님 이번 회차 추천번호 안내드립니다.`,
+          ? `[플러스로또] ${m.name}님 가입을 환영합니다.`
+          : `[플러스로또] ${m.name}님 이번 회차 추천번호 안내드립니다.`,
         type: isJoin ? 'join' : 'recommend',
         status: '발송완료',
         sent_at: new Date(regMs + (k + 1) * intIn(rng, 1, 5) * 864e5).toISOString(),
@@ -542,7 +542,7 @@ function buildSiteSettings(): SiteSettings {
     bank: {
       bank_name: '국민은행',
       account_no: '12345601234567',
-      holder: '(주)88로또',
+      holder: '(주)플러스로또',
       guide: '입금자명을 주문자명과 동일하게 입력해 주세요. 미입금 시 24시간 후 자동 취소됩니다.',
     },
     grade_colors: {
@@ -571,11 +571,11 @@ function buildSiteSettings(): SiteSettings {
       ad_optout: '',
     },
     win_messages: [
-      { rank: 1, body: '[88로또] 축하합니다! $name님 $contents 1등에 당첨되셨습니다. 자세한 안내는 고객센터로 연락드리겠습니다.' },
-      { rank: 2, body: '[88로또] 축하합니다! $name님 $contents 2등에 당첨되셨습니다.' },
-      { rank: 3, body: '[88로또] 축하합니다! $name님 $contents 3등에 당첨되셨습니다.' },
-      { rank: 4, body: '[88로또] $name님 $contents 4등에 당첨되셨습니다. 축하드립니다.' },
-      { rank: 5, body: '[88로또] $name님 $contents 5등에 당첨되셨습니다. 축하드립니다.' },
+      { rank: 1, body: '[플러스로또] 축하합니다! $name님 $contents 1등에 당첨되셨습니다. 자세한 안내는 고객센터로 연락드리겠습니다.' },
+      { rank: 2, body: '[플러스로또] 축하합니다! $name님 $contents 2등에 당첨되셨습니다.' },
+      { rank: 3, body: '[플러스로또] 축하합니다! $name님 $contents 3등에 당첨되셨습니다.' },
+      { rank: 4, body: '[플러스로또] $name님 $contents 4등에 당첨되셨습니다. 축하드립니다.' },
+      { rank: 5, body: '[플러스로또] $name님 $contents 5등에 당첨되셨습니다. 축하드립니다.' },
     ],
     report: {
       enabled: true,
@@ -596,7 +596,7 @@ function buildSiteSettings(): SiteSettings {
     weekly_free_reco: { enabled: true, set_count: 30, logic_ratio: 100 },
     terms: [
       '제1조 (목적)',
-      '본 약관은 88로또(이하 "회사")가 제공하는 로또 번호 추천 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.',
+      '본 약관은 플러스로또(이하 "회사")가 제공하는 로또 번호 추천 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.',
       '',
       '제2조 (정의)',
       '1. "회원"이란 본 약관에 동의하고 서비스 이용 자격을 부여받은 자를 말합니다.',
@@ -651,9 +651,9 @@ export function buildSeed(): DbShape {
       { id: 'prod-royal', name: '로얄 6개월', price: 264000, duration_months: 6, grade_granted: 'royal', is_active: true },
     ],
     sms_templates: [
-      { key: 'join', title: '가입 환영', body: '[88로또] $name님 가입을 환영합니다. 아이디: $id / 임시비밀번호: $pw', category: 'join' },
-      { key: 'recommend', title: '추천번호 안내', body: '[88로또] $name님 이번 회차 추천번호: $num', category: 'recommend' },
-      { key: 'win', title: '당첨 안내', body: '[88로또] $name님 $contents', category: 'win' },
+      { key: 'join', title: '가입 환영', body: '[플러스로또] $name님 가입을 환영합니다. 아이디: $id / 임시비밀번호: $pw', category: 'join' },
+      { key: 'recommend', title: '추천번호 안내', body: '[플러스로또] $name님 이번 회차 추천번호: $num', category: 'recommend' },
+      { key: 'win', title: '당첨 안내', body: '[플러스로또] $name님 $contents', category: 'win' },
     ],
     members,
     payments,

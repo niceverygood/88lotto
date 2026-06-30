@@ -62,7 +62,7 @@ export function LoginPage() {
         {/* 브랜드 */}
         <div className="mb-6 flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-sm bg-[color:var(--accent-500)]" />
-          <span className="text-[17px] font-extrabold text-ink-900">88로또</span>
+          <span className="text-[17px] font-extrabold text-ink-900">플러스로또</span>
           <span className="text-[12px] text-gray-400">운영 콘솔</span>
         </div>
 

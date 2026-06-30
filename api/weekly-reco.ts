@@ -61,11 +61,11 @@ function resolveExcludeForGrade(settings: SiteSettingsLite, grade: string | null
 // ── 이하 생성 로직: src/lib/lottoGenerator.ts 사본(임포트 제거) ─────────────────
 // 로또(6/45) 추천 번호 생성기 — 순수 도메인 로직(React/UI 비의존).
 //
-// 운영사 「88로또 제외수 프로그램」의 문서화된 방식(프로그램_로직_제외수)을 그대로 구현한다.
+// 운영사 「플러스로또 제외수 프로그램」의 문서화된 방식(프로그램_로직_제외수)을 그대로 구현한다.
 // 핵심은 '제외수(excluded numbers)' 산정이다 — 과거 회차 데이터에서 5개 규칙으로 제외 후보를
 // 뽑아 10·15·20개로 압축하고, 남은 풀(45 − 제외수)에서 패턴 품질 필터를 통과하는 6개 조합을 만든다.
 //
-// 5개 제외 규칙(문서 '88로또 프로그램 실제 적용 방식'):
+// 5개 제외 규칙(문서 '플러스로또 프로그램 실제 적용 방식'):
 //   ① 직전회차 — 직전 당첨 6개 중 최상위 2 + 최하위 1 = 3개
 //   ② 직전회차 보너스 — 보너스 1개
 //   ③ 월별 저출현 — 대상 추첨월에 역대 출현이 가장 적은 번호 (포아송·평균회귀 논거)
@@ -496,7 +496,7 @@ const PAID_GRADES = new Set(['gold', 'goldp', 'vip', 'royal'])
 /** 조합 목록 → SMS 본문(LMS). */
 function formatComboSms(name: string, round: number, sets: number[][]): string {
   const lines = sets.map((s, i) => `${String(i + 1).padStart(2, '0')}. ${s.join(', ')}`)
-  return `[88로또] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
+  return `[플러스로또] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
 }
 
 /** 한국 문자 바이트 길이(비ASCII=2byte). SMS=90byte 기준. (src/lib/oneshot.ts koByteLength 동기화) */

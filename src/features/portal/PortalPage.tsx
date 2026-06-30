@@ -72,7 +72,7 @@ export function PortalPage() {
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex h-14 max-w-[560px] items-center gap-2 px-4">
           <span className="h-2.5 w-2.5 rounded-sm bg-[color:var(--accent-500)]" />
-          <span className="text-[17px] font-extrabold text-ink-900">88로또</span>
+          <span className="text-[17px] font-extrabold text-ink-900">플러스로또</span>
           <span className="text-[12px] text-gray-400">내 추천번호 확인</span>
           {session && (
             <button
