@@ -11,6 +11,7 @@
 // 이 파일은 api/ 디렉터리라 Vite 앱 빌드(tsconfig include=src)에 포함되지 않는다(Vercel 함수로 빌드).
 import { ProxyAgent, fetch as uFetch, FormData as UFormData } from 'undici'
 import { createClient } from '@supabase/supabase-js'
+import crypto from 'node:crypto'
 
 const ONESHOT_BASE = 'https://api2.msgagent.com/api/webshot/send/general'
 
@@ -55,10 +56,44 @@ export default async function handler(req: any, res: any) {
     const msg = String(body.msg_body ?? '')
     const msgType = body.msgType === 'LMS' || body.msgType === 'MMS' ? body.msgType : 'SMS'
 
-    if (!id) return res.status(500).json({ ok: false, code: 'CONFIG', message: 'ONESHOT_ID 미설정' })
     if (!dest || !msg || !sender)
       return res.status(400).json({ ok: false, code: '200', message: '필수 값 누락(dest_phone/msg_body/send_phone)' })
 
+    // ── Solapi 경로 (API키 HMAC 인증 → 고정IP/프록시 불필요). 키 설정 시 우선 사용. Fixie 한도 영구 해소(현장 6/30). ──
+    // SOLAPI_ENABLED='true' 일 때만 Solapi 사용(IP화이트리스트 해제 검증 후 활성화). 그 전엔 OneShot 유지(현장 6/30).
+    const solapiKey = process.env.SOLAPI_API_KEY
+    const solapiSecret = process.env.SOLAPI_API_SECRET
+    if (solapiKey && solapiSecret && process.env.SOLAPI_ENABLED === 'true') {
+      try {
+        const sdate = new Date().toISOString()
+        const salt = crypto.randomBytes(32).toString('hex')
+        const signature = crypto.createHmac('sha256', solapiSecret).update(sdate + salt).digest('hex')
+        const message: Record<string, unknown> = {
+          to: dest,
+          from: sender,
+          text: msg,
+          type: msgType === 'MMS' ? 'MMS' : msgType === 'LMS' ? 'LMS' : 'SMS',
+        }
+        if (msgType !== 'SMS') message.subject = String(body.subject ?? '추천번호').slice(0, 40)
+        const sr = await fetch('https://api.solapi.com/messages/v4/send', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `HMAC-SHA256 apiKey=${solapiKey}, date=${sdate}, salt=${salt}, signature=${signature}`,
+          },
+          body: JSON.stringify({ message }),
+        })
+        const sd = (await sr.json().catch(() => ({}))) as Record<string, unknown>
+        const code = String(sd.statusCode ?? '')
+        return res
+          .status(200)
+          .json({ ok: code === '2000', code, cmid: sd.messageId ?? null, provider: 'solapi', msgType, raw: sd })
+      } catch (e) {
+        return res.status(200).json({ ok: false, code: 'EXCEPTION', provider: 'solapi', message: String(e) })
+      }
+    }
+
+    if (!id) return res.status(500).json({ ok: false, code: 'CONFIG', message: 'ONESHOT_ID 미설정(Solapi 미설정 시 필수)' })
     const form = new UFormData()
     form.append('id', id)
     form.append('dest_phone', dest)
