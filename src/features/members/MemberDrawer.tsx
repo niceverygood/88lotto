@@ -113,7 +113,6 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     setSendDay(d === null ? '' : String(d))
     setSendCount(c === null ? '' : String(c))
     setHpPw(metaStr(member?.meta, 'homepage_pw'))
-    setEndDate(metaStr(member?.meta, 'end_date').slice(0, 10))
     setRecoPaused(member?.meta?.reco_paused === true)
     setPayProduct('')
     setPayMethod('bank')
@@ -132,16 +131,25 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     return m
   }, [staff])
 
-  // 종료일 = meta.end_date(수정 override) → 없으면 승인결제의 최신 period_end (현장 6/26)
-  const paidEnd = useMemo(() => {
-    const ends = payments
-      .filter((p) => p.status === 'approved' && p.period_end)
-      .map((p) => p.period_end as string)
+  // 종료일 기본값 = 결제일(없으면 가입일) + 1년. meta.end_date(수정 override) 우선 (현장 6/26·6/29).
+  const defaultEnd = useMemo(() => {
+    const paidAts = payments
+      .filter((p) => p.status === 'approved' && p.paid_at)
+      .map((p) => p.paid_at as string)
       .sort()
-    return ends.length ? ends[ends.length - 1] : null
-  }, [payments])
+    const base = paidAts.length ? paidAts[paidAts.length - 1] : member?.registered_at
+    if (!base) return null
+    const d = new Date(base)
+    d.setFullYear(d.getFullYear() + 1)
+    return d.toISOString()
+  }, [payments, member?.registered_at])
   const endOverride = metaStr(member?.meta, 'end_date')
-  const effEnd = endOverride || paidEnd
+  const effEnd = endOverride || defaultEnd
+  // 종료일 입력칸 기본값: override 있으면 그 값, 없으면 결제일/가입일+1년(현장 6/29).
+  useEffect(() => {
+    setEndDate(endOverride ? endOverride.slice(0, 10) : defaultEnd ? defaultEnd.slice(0, 10) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member?.id, defaultEnd])
   const teamName = useMemo(() => {
     const m: Record<string, string> = {}
     for (const t of teams) m[t.id] = t.name
@@ -343,7 +351,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             </label>
             <label className="block">
               <span className="mb-1 block text-[11px] font-semibold text-gray-500">
-                종료일 <span className="font-normal text-gray-400">(비우면 결제 종료일)</span>
+                종료일 <span className="font-normal text-gray-400">(기본 결제일+1년)</span>
               </span>
               <input
                 type="date"
