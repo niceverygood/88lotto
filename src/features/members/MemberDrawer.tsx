@@ -163,7 +163,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
 
   if (!member) {
     return (
-      <Drawer open={open} onClose={onClose} title="회원 상세">
+      <Drawer open={open} onClose={onClose} title="회원 상세" movable storageKey="member">
         <div className="py-10 text-center text-[12.5px] text-gray-400">불러오는 중…</div>
       </Drawer>
     )
@@ -192,7 +192,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   )
 
   return (
-    <Drawer open={open} onClose={onClose} title={title} width={620}>
+    <Drawer open={open} onClose={onClose} title={title} width={620} movable storageKey="member">
       {/* 빠른 액션 */}
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
         <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-gray-500">
