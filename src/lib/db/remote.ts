@@ -41,6 +41,42 @@ export async function selectAll<T>(table: string): Promise<T[]> {
   return paginateAll<T>((from, to) => sb().from(table).select('*').range(from, to))
 }
 
+// .in('id', [...]) 는 필터를 URL 쿼리스트링에 싣는다. UUID(38자)×N 이라 N≈300 부터 URL 이
+// ~12KB 를 넘겨 PostgREST 게이트웨이가 414/400(Bad Request)로 거절한다(현장 6/30: 단체문자
+// 1000건 전체 실패). → id 목록을 안전 청크로 쪼개 .in() 을 나눠 호출한다(URL 길이 한계 회피).
+export const ID_IN_CHUNK = 150 // UUID 150개 ≈ 6KB(여유). 실측: 300 OK·400 실패.
+
+/** 대량 id 목록을 청크로 나눠 select.in() (URL 414 회피). 결과를 concat 해서 반환. */
+export async function selectByIds<T>(
+  table: string,
+  columns: string,
+  ids: string[],
+  idCol = 'id',
+): Promise<T[]> {
+  const out: T[] = []
+  for (let i = 0; i < ids.length; i += ID_IN_CHUNK) {
+    const chunk = ids.slice(i, i + ID_IN_CHUNK)
+    const { data, error } = await sb().from(table).select(columns).in(idCol, chunk)
+    if (error) throw error
+    if (data) out.push(...(data as T[]))
+  }
+  return out
+}
+
+/** 대량 id 목록을 청크로 나눠 update(patch).in() (URL 414 회피). */
+export async function updateByIds(
+  table: string,
+  patch: Record<string, unknown>,
+  ids: string[],
+  idCol = 'id',
+): Promise<void> {
+  for (let i = 0; i < ids.length; i += ID_IN_CHUNK) {
+    const chunk = ids.slice(i, i + ID_IN_CHUNK)
+    const { error } = await sb().from(table).update(patch).in(idCol, chunk)
+    if (error) throw error
+  }
+}
+
 /** 여러 배열 테이블을 병렬 조회해 readDb()-호환 부분 스냅샷으로 반환. */
 export async function fetchTables<K extends ArrayKey>(keys: readonly K[]): Promise<Pick<DbShape, K>> {
   const pairs = await Promise.all(

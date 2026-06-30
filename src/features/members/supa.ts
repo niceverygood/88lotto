@@ -9,7 +9,12 @@ import { supabase } from '@/lib/supabase'
 import { genId, nowIso } from '@/lib/db/store'
 import { recoSmsBody, renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
-import { paginateAll, selectAll } from '@/lib/db/remote'
+import { ID_IN_CHUNK, paginateAll, selectAll, selectByIds, updateByIds } from '@/lib/db/remote'
+import { mapPool } from '@/lib/async'
+
+// 단체문자 동시 발송 한도(브라우저). 너무 높이면 Fixie 동시연결·OneShot 레이트리밋 위험 → 보수적 6
+// (크론 weekly-reco 는 server-side CONC=12). 1000건 기준 순차 대비 체감 ~6배 단축.
+const SMS_SEND_CONC = 6
 import { resolveExcludeForGrade } from '@/lib/lotto'
 import { generateIssueSets } from '@/lib/lottoGenerator'
 import type { ManualIssueInput, MemberCreateInput, MemberPatch, MySmsRow } from './api'
@@ -136,14 +141,21 @@ export async function fetchMineSmsLog(uid: string, limit: number): Promise<MySms
   const nameById = new Map((mem ?? []).map((m) => [(m as { id: string }).id, (m as { name: string }).name]))
   const ids = [...nameById.keys()]
   if (ids.length === 0) return []
-  const { data: sms, error: se } = await sb()
-    .from('sms_sends')
-    .select('*')
-    .in('member_id', ids)
-    .order('sent_at', { ascending: false })
-    .limit(limit)
-  if (se) throw se
-  return ((sms ?? []) as SmsSend[]).map((s) => ({
+  // id 청크별 조회(URL 414 회피 — 담당 회원 300+ 명인 rep) 후 병합·정렬·상위 limit.
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += ID_IN_CHUNK) chunks.push(ids.slice(i, i + ID_IN_CHUNK))
+  const parts = await Promise.all(
+    chunks.map((c) =>
+      sb().from('sms_sends').select('*').in('member_id', c).order('sent_at', { ascending: false }).limit(limit),
+    ),
+  )
+  const merged: SmsSend[] = []
+  for (const p of parts) {
+    if (p.error) throw p.error
+    merged.push(...((p.data ?? []) as SmsSend[]))
+  }
+  const sms = merged.sort((a, b) => (b.sent_at ?? '').localeCompare(a.sent_at ?? '')).slice(0, limit)
+  return sms.map((s) => ({
     id: s.id,
     member_id: s.member_id,
     member_name: nameById.get(s.member_id) ?? s.member_id,
@@ -366,10 +378,12 @@ export async function bulkUpdateMemberMeta(
   patch: Record<string, unknown>,
   actor: string | null,
 ): Promise<void> {
-  // 선택은 pageSize(≤1000) 한도라 .in(ids) 결과도 ≤1000(캡 경계 내) — 추가 페이지네이션 불필요.
-  const { data, error: se } = await sb().from('members').select('id, meta').in('id', ids)
-  if (se) throw se
-  const rows = (data ?? []) as { id: string; meta: Record<string, unknown> | null }[]
+  // id 목록을 청크로 나눠 조회(URL 414 회피 — 300+ 건이면 단일 .in() 가 거절됨).
+  const rows = await selectByIds<{ id: string; meta: Record<string, unknown> | null }>(
+    'members',
+    'id, meta',
+    ids,
+  )
   // 25건씩 병렬 — 100건 기준 round-trip 체감 최소화.
   const CHUNK = 25
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -437,19 +451,14 @@ export async function bulkUpdateMembers(
   patch: MemberPatch & { inflow_type?: string },
   actor: string | null,
 ): Promise<void> {
-  const { error } = await sb()
-    .from('members')
-    .update({ ...patch, ...statusFlags(patch.status) })
-    .in('id', ids)
-  if (error) throw error
+  await updateByIds('members', { ...patch, ...statusFlags(patch.status) }, ids)
   await pushLog({ kind: 'admin', actor, action: 'member.bulk_update', meta: { count: ids.length, ids, patch } })
 }
 
 export async function assignStaff(ids: string[], staffId: string, actor: string | null): Promise<void> {
   const { data: st } = await sb().from('staff').select('team_id').eq('id', staffId).maybeSingle()
   const teamId = (st as { team_id: string | null } | null)?.team_id ?? null
-  const { error: e1 } = await sb().from('members').update({ assigned_staff_id: staffId, team_id: teamId }).in('id', ids)
-  if (e1) throw e1
+  await updateByIds('members', { assigned_staff_id: staffId, team_id: teamId }, ids)
   const ts = nowIso()
   const rows = ids.map((mid) => ({
     id: genId('as'),
@@ -496,8 +505,7 @@ export async function autoAssign(
 }
 
 export async function resetAssign(ids: string[], actor: string | null): Promise<void> {
-  const { error: e1 } = await sb().from('members').update({ assigned_staff_id: null, team_id: null }).in('id', ids)
-  if (e1) throw e1
+  await updateByIds('members', { assigned_staff_id: null, team_id: null }, ids)
   const ts = nowIso()
   const rows = ids.map((mid) => ({
     id: genId('as'),
@@ -515,8 +523,11 @@ export async function resetAssign(ids: string[], actor: string | null): Promise<
 /** DB 초기화(§V2-4) — mock useResetMembers 의 supabase 미러. 콜메모 소프트삭제(meta.reset_memos) 보존. */
 export async function resetMembers(ids: string[], actor: string | null): Promise<string[]> {
   const ts = nowIso()
-  const { data } = await sb().from('members').select('id, memo, meta').in('id', ids)
-  const rows = (data ?? []) as { id: string; memo: string | null; meta: Record<string, unknown> | null }[]
+  const rows = await selectByIds<{ id: string; memo: string | null; meta: Record<string, unknown> | null }>(
+    'members',
+    'id, memo, meta',
+    ids,
+  )
   for (const r of rows) {
     const archive = (((r.meta?.reset_memos as unknown[] | undefined) ?? []) as unknown[]).slice()
     // 리스트형 콜메모 전체 보존 후 비움. 없으면 단건 메모 폴백.
@@ -566,9 +577,8 @@ export async function resetMembers(ids: string[], actor: string | null): Promise
 export async function sendSms(ids: string[], templateKey: string, actor: string | null): Promise<void> {
   const { data: tplData } = await sb().from('sms_templates').select('*').eq('key', templateKey).maybeSingle()
   const tpl = tplData as SmsTemplate | null
-  const { data: memData, error: me } = await sb().from('members').select('*').in('id', ids)
-  if (me) throw me
-  const members = (memData ?? []) as Member[]
+  // id 청크 조회(URL 414 회피 — 단체문자 300+ 건이면 단일 .in() 가 거절돼 전체 실패하던 버그).
+  const members = await selectByIds<Member>('members', '*', ids)
   const { realSend, sender_no, adOptout } = await fetchSmsConfig()
   const ts = nowIso()
   const type = smsTypeForTemplate(templateKey)
@@ -586,8 +596,8 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
     recoTarget = recoRounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
   }
 
-  const rows: SmsSend[] = []
-  for (const m of members) {
+  // 제한 동시성(SMS_SEND_CONC)으로 발송 — 순차 1건씩이면 1000건에 수십분 걸려 탭 끊김 위험.
+  const rows: SmsSend[] = await mapPool(members, SMS_SEND_CONC, async (m) => {
     let body: string
     if (isReco && recoSettings) {
       const recos = Array.isArray(m.meta.weekly_recos) ? (m.meta.weekly_recos as WeeklyRecoIssue[]) : []
@@ -615,7 +625,7 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
       const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sender_no })
       status = r.ok ? '발송완료' : `실패(${r.code ?? '?'})`
     }
-    rows.push({
+    return {
       id: genId('sms'),
       member_id: m.id,
       template_key: templateKey,
@@ -624,8 +634,8 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
       type,
       status,
       sent_at: ts,
-    })
-  }
+    }
+  })
   // 발송내역 기록 실패는 throw 하지 않음(D68 #7) — 실발송이 이미 나간 뒤라 '실패' 표시·재발송 유도를 막는다.
   const { error: e2 } = await sb().from('sms_sends').insert(rows)
   if (e2) {
@@ -648,29 +658,28 @@ async function fetchSmsConfig(): Promise<{ realSend: boolean; sender_no: string;
 
 /** 직접 입력 문자 발송(<회원정보창> 3) — 템플릿 없이 자유 본문. 실발송 게이트는 mock 과 동일. */
 export async function sendCustomSms(ids: string[], body: string, actor: string | null): Promise<void> {
-  const { data: memData, error: me } = await sb().from('members').select('id, phone').in('id', ids)
-  if (me) throw me
-  const members = (memData ?? []) as { id: string; phone: string }[]
+  // id 청크 조회(URL 414 회피 — 자유본문 단체발송 300+ 건 전체 실패 버그).
+  const members = await selectByIds<{ id: string; phone: string }>('members', 'id, phone', ids)
   const { realSend, sender_no } = await fetchSmsConfig()
   const ts = nowIso()
-  const rows: SmsSend[] = []
-  for (const m of members) {
+  // 제한 동시성 발송(순차 시 대량건 수십분).
+  const rows: SmsSend[] = await mapPool(members, SMS_SEND_CONC, async (m) => {
     let status = '미발송'
     if (realSend) {
       const r = await sendOneShot({ dest_phone: m.phone, msg_body: body, send_phone: sender_no })
       status = r.ok ? '발송완료' : '실패'
     }
-    rows.push({
+    return {
       id: genId('sms'),
       member_id: m.id,
       template_key: null,
       phone: m.phone,
       body,
-      type: 'direct',
+      type: 'direct' as const,
       status,
       sent_at: ts,
-    })
-  }
+    }
+  })
   // 기록 실패 best-effort(D68 #7) — 실발송 후라 throw 시 '실패' 오표시·재발송 위험.
   const { error } = await sb().from('sms_sends').insert(rows)
   if (error) {
