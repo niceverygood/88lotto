@@ -1,4 +1,4 @@
-// 플러스로또 도메인 타입 — 라이브 Supabase 확정 전 수기 작성한 인터림 모델.
+// 88로또 도메인 타입 — 라이브 Supabase 확정 전 수기 작성한 인터림 모델.
 // TODO(live-verify): 실 DB 연결 시 `supabase gen types typescript` 결과로 대체/정합. (DECISIONS D1)
 
 export type Role = 'admin' | 'manager' | 'leader' | 'rep'

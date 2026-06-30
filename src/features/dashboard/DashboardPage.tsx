@@ -42,7 +42,7 @@ interface KpiConfig {
 }
 
 export function DashboardPage() {
-  usePageMeta('대시보드', '플러스로또 운영 콘솔')
+  usePageMeta('대시보드', '88로또 운영 콘솔')
   const navigate = useNavigate()
   const role = useRole()
   const { data: navMap } = useNavAccess()

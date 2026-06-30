@@ -103,7 +103,7 @@ export function AppShell() {
           )}
         >
           <span className="h-2 w-2 shrink-0 rounded-sm bg-[color:var(--accent-500)]" />
-          {!collapsed && <span className="text-[15px]">플러스로또</span>}
+          {!collapsed && <span className="text-[15px]">88로또</span>}
         </div>
 
         <nav className="flex-1">

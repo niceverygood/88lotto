@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// 플러스로또 고객 홈페이지 — 플러스로또자료 (/portal/data)  [Phase 2]
+// 88로또 고객 홈페이지 — 88로또자료 (/portal/data)  [Phase 2]
 // ─────────────────────────────────────────────────────────────────────────
 // 최근 회차 당첨번호 자료실. useRecentRounds 로 최근 N회차를 불러와
 //   ① 최신 회차 하이라이트 카드(번호 + 합·홀짝 등 요약)
@@ -93,7 +93,7 @@ export function DataPage() {
       {/* ── 페이지 헤더 ──────────────────────────────────────── */}
       <header className="mb-7">
         <p className="mb-1 text-[12.5px] font-bold uppercase tracking-wide text-primary-600">
-          플러스로또자료
+          88로또자료
         </p>
         <h1 className="text-[26px] font-extrabold tracking-tight text-ink-900 sm:text-[30px]">
           회차별 당첨번호

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// 플러스로또 고객 홈페이지 — 플러스멤버십 (등급 안내) 페이지 (/portal/membership)
+// 88로또 고객 홈페이지 — 88멤버십 (등급 안내) 페이지 (/portal/membership)
 // ─────────────────────────────────────────────────────────────────────────
 // 무료/골드/골드플러스/VIP/로얄 등급의 혜택을 비교하는 마케팅·안내 페이지.
 // 등급 색은 전부 grade-* 토큰(임의 hex 금지). 가격은 "문의" placeholder.
@@ -290,7 +290,7 @@ export function MembershipPage() {
         <div className="mx-auto max-w-[1120px] px-4 py-14 sm:px-6 sm:py-16">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[12px] font-semibold text-accent-500">
             <Crown className="h-3.5 w-3.5" />
-            플러스멤버십
+            88멤버십
           </span>
           <h1 className="mt-4 text-[28px] font-extrabold leading-tight text-white sm:text-[34px]">
             등급별 맞춤 번호 서비스로

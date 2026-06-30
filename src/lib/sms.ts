@@ -21,7 +21,7 @@ export function renderSms(body: string, m: Member): string {
  */
 export function recoSmsBody(roundNo: number, sets: number[][]): string {
   const lines = sets.map((s, i) => `${i + 1}) ${s.join(' ')}`)
-  return `[플러스로또] ${roundNo}회 추천번호 ${sets.length}조합\n${lines.join('\n')}`
+  return `[88로또] ${roundNo}회 추천번호 ${sets.length}조합\n${lines.join('\n')}`
 }
 
 /** 템플릿 key → 발송유형(가입·추천·당첨·마케팅). 미지정 템플릿은 마케팅으로 분류. */

@@ -1,4 +1,4 @@
--- 플러스로또 RLS 정책 초안 (CLAUDE §5). 참조/마이그레이션용.
+-- 88로또 RLS 정책 초안 (CLAUDE §5). 참조/마이그레이션용.
 -- TODO(live-verify): `08 권한관리` 화면 확인 후 모듈별 경계 확정. mock 모드에서는 미적용
 -- (lib/db/store.ts 로컬 계층 사용). 실 Supabase 전환 시 이 파일을 적용한다.
 
