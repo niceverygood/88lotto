@@ -102,6 +102,8 @@ export interface MemberPatch {
   tendency?: string | null
   consult_status?: string | null
   outcall_done?: boolean
+  name?: string // 기본정보 인라인 수정(현장 피드백 7/6)
+  phone?: string
 }
 
 // ── 콜메모(리스트형) — 현장 피드백: 메모 1건만이 아니라 순차적으로 누적 ──────
@@ -113,6 +115,23 @@ export interface MemoEntry {
   created_at: string
   deleted_at?: string | null
   deleted_by?: string | null
+}
+
+// ── 민원관리(현장 피드백 7/6) — meta.complaints 리스트형 누적(메모와 동일 패턴) ────────
+export interface ComplaintEntry {
+  id: string
+  created_at: string
+  author: string | null // 작성 staff id
+  body: string // 메모
+  type: string // 민원유형: 카드/경찰/소보원
+  result: string // 민원처리결과: 성공/실패
+}
+
+/** member.meta.complaints 를 안전하게 읽는다(없으면 빈 배열). 민원횟수 = 이 배열 길이. */
+export function readComplaints(m: Member | null | undefined): ComplaintEntry[] {
+  if (!m) return []
+  const list = m.meta?.complaints as ComplaintEntry[] | undefined
+  return Array.isArray(list) ? list : []
 }
 
 /** member.meta.memos 를 안전하게 읽는다(없으면 빈 배열). */
@@ -419,6 +438,36 @@ export function useAddMemo() {
         m.meta = { ...m.meta, memos: list }
         m.memo = body // 최신 메모(컬럼/메모있음 세그먼트 호환)
         db.logs.push(adminLog(user?.id ?? null, 'member.memo_add', v.id, { body }))
+      })
+      return v.id
+    },
+    onSuccess: (id) => invalidate([id]),
+  })
+}
+
+/** 민원 1건 추가(현장 피드백 7/6) — 메모+유형(카드/경찰/소보원)+처리결과(성공/실패) 리스트형 누적. */
+export function useAddComplaint() {
+  const user = useCurrentUser()
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; body: string; type: string; result: string }) => {
+      if (dataSource === 'supabase') {
+        await supa.addComplaint(v.id, v.body, v.type, v.result, user?.id ?? null)
+        return v.id
+      }
+      mutateDb((db) => {
+        const m = db.members.find((x) => x.id === v.id)
+        if (!m) return
+        const entry: ComplaintEntry = {
+          id: genId('cmpl'),
+          created_at: nowIso(),
+          author: user?.id ?? null,
+          body: v.body,
+          type: v.type,
+          result: v.result,
+        }
+        m.meta = { ...m.meta, complaints: [...readComplaints(m), entry] }
+        db.logs.push(adminLog(user?.id ?? null, 'member.complaint_add', v.id, { type: v.type, result: v.result }))
       })
       return v.id
     },

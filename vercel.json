@@ -5,7 +5,8 @@
     "api/weekly-reco.ts": { "maxDuration": 300 },
     "api/weekly-lotto-sync.ts": { "maxDuration": 300 },
     "api/send-sms.ts": { "maxDuration": 30 },
-    "api/transcribe-call.ts": { "maxDuration": 60 }
+    "api/transcribe-call.ts": { "maxDuration": 60 },
+    "api/ingest-call-recording.ts": { "maxDuration": 30 }
   },
   "crons": [
     { "path": "/api/weekly-lotto-sync", "schedule": "0,30 12 * * 6" },

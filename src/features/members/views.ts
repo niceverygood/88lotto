@@ -64,6 +64,12 @@ export type AgeBand = (typeof AGE_BANDS)[number]
 export const GENDERS = ['남', '여'] as const
 export type Gender = (typeof GENDERS)[number]
 
+// 민원관리 — 현장 피드백(2026-07-06). member.meta.complaints[] 로 누적 저장(리스트형, 메모와 동일 패턴).
+export const COMPLAINT_TYPES = ['카드', '경찰', '소보원'] as const
+export type ComplaintType = (typeof COMPLAINT_TYPES)[number]
+export const COMPLAINT_RESULTS = ['성공', '실패'] as const
+export type ComplaintResult = (typeof COMPLAINT_RESULTS)[number]
+
 export type ViewGroup = '상태' | '등급' | '담당' | '유입' | '운영'
 
 export interface MemberView {

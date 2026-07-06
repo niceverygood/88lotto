@@ -358,6 +358,30 @@ export async function addMemo(id: string, body: string, actor: string | null): P
   await pushLog({ kind: 'admin', actor, action: 'member.memo_add', target_type: 'member', target_id: id, meta: { body } })
 }
 
+/** 민원 1건 append(리스트형, 현장 피드백 7/6). meta.complaints 에 누적. */
+export async function addComplaint(
+  id: string,
+  body: string,
+  type: string,
+  result: string,
+  actor: string | null,
+): Promise<void> {
+  const { data: cur } = await sb().from('members').select('meta').eq('id', id).maybeSingle()
+  const meta = ((cur as { meta: Record<string, unknown> } | null)?.meta ?? {}) as Record<string, unknown>
+  const list = Array.isArray(meta.complaints) ? (meta.complaints as unknown[]) : []
+  const entry = { id: genId('cmpl'), created_at: nowIso(), author: actor, body, type, result }
+  const { error } = await sb().from('members').update({ meta: { ...meta, complaints: [...list, entry] } }).eq('id', id)
+  if (error) throw error
+  await pushLog({
+    kind: 'admin',
+    actor,
+    action: 'member.complaint_add',
+    target_type: 'member',
+    target_id: id,
+    meta: { type, result },
+  })
+}
+
 /** 회원 meta 설정(조합발송요일/갯수/홈페이지 비번 등) 병합 갱신. */
 export async function updateMemberMeta(
   id: string,

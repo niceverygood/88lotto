@@ -17,6 +17,7 @@ import { RecommendPage } from '@/features/lotto/RecommendPage'
 import { BetsPage } from '@/features/bets/BetsPage'
 import { AdminsPage } from '@/features/admins/AdminsPage'
 import { RolesPage } from '@/features/admins/RolesPage'
+import { UnmatchedRecordingsPage } from '@/features/admins/UnmatchedRecordingsPage'
 import { LogsPage } from '@/features/logs/LogsPage'
 import { StatsPage } from '@/features/stats/StatsPage'
 import { SettingsLayout } from '@/features/settings/SettingsLayout'
@@ -95,6 +96,14 @@ export function AppRoutes() {
         <Route path="/bets" element={<RequireNav navKey="bets"><BetsPage /></RequireNav>} />
         <Route path="/admins" element={<RequireNav navKey="admins"><AdminsPage /></RequireNav>} />
         <Route path="/admins/roles" element={<RequireNav navKey="admins"><RolesPage /></RequireNav>} />
+        <Route
+          path="/admins/recordings"
+          element={
+            <RequireNav navKey="admins">
+              <UnmatchedRecordingsPage />
+            </RequireNav>
+          }
+        />
         <Route path="/logs" element={<Navigate to="/logs/admin" replace />} />
         <Route path="/logs/:kind" element={<RequireNav navKey="logs"><LogsPage /></RequireNav>} />
         <Route path="/stats" element={<RequireNav navKey="stats"><StatsPage /></RequireNav>} />

@@ -3,11 +3,11 @@
 // nav_access 는 행(nav_key→roles)으로 영속 → 맵을 upsert 한다(remote.fetchNavAccess 와 대칭).
 // TODO(live-verify): 라이브 운영자 생성은 Supabase auth.users 연결(auth_user_id)이 별도로 필요.
 import type { Role, Staff } from '@/types/db'
-import { genId } from '@/lib/db/store'
+import { genId, nowIso } from '@/lib/db/store'
 import { fetchSiteSettings, insertLog, sb } from '@/lib/db/remote'
 import type { NavAccessMap } from '@/lib/permissions'
 import { CALL_VOLUME_ALERT_DEFAULT, tallyCallVolume, type CallVolumeStatus } from '@/lib/callVolume'
-import { tallyTodayDb, type StaffInput, type TodayDbCount } from './api'
+import { tallyTodayDb, type MemberLite, type StaffInput, type TodayDbCount, type UnmatchedRecording } from './api'
 
 /** 금일(오늘 0시~) 배정 이력을 staff 별 {전체/수동/자동} 으로 집계. */
 export async function fetchTodayDbCounts(): Promise<Record<string, TodayDbCount>> {
@@ -145,5 +145,72 @@ export async function saveNavAccess(map: NavAccessMap, actor: string | null): Pr
     target_type: 'nav_access',
     target_id: null,
     meta: { modules: rows.length },
+  })
+}
+
+// ── 통화녹음 자동업로드 미매칭 보관함(현장 피드백 7/3·7/6) ──────────────────────────
+/** 아직 회원에 연결 안 된 미매칭 녹음 목록(최신순). */
+export async function fetchUnmatchedRecordings(): Promise<UnmatchedRecording[]> {
+  const { data, error } = await sb()
+    .from('unmatched_call_recordings')
+    .select('id, raw_phone, normalized_phone, recorded_at, file_path, file_name, uploaded_by, created_at')
+    .is('resolved_member_id', null)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as UnmatchedRecording[]
+}
+
+/** 재생용 서명 URL(비공개 버킷, 1시간 유효). */
+export async function signUnmatchedRecordingUrl(filePath: string): Promise<string> {
+  const { data, error } = await sb().storage.from('call-recordings').createSignedUrl(filePath, 3600)
+  if (error) throw error
+  return data.signedUrl
+}
+
+/** 이름/전화/로그인ID 검색(최대 8건) — '회원에게 연결' 드롭다운용. */
+export async function searchMembersLite(q: string): Promise<MemberLite[]> {
+  const { data, error } = await sb()
+    .from('members')
+    .select('id, name, phone, user_id')
+    .or(`name.ilike.%${q}%,phone.ilike.%${q}%,user_id.ilike.%${q}%`)
+    .limit(8)
+  if (error) throw error
+  return (data ?? []) as MemberLite[]
+}
+
+/** 미매칭 녹음을 회원에 연결 — 그 회원 meta.call_recordings 에 append + 미매칭 행을 resolved 처리. */
+export async function resolveUnmatchedRecording(
+  rec: UnmatchedRecording,
+  memberId: string,
+  actor: string | null,
+): Promise<void> {
+  const { data: cur } = await sb().from('members').select('meta').eq('id', memberId).maybeSingle()
+  const meta = ((cur as { meta: Record<string, unknown> } | null)?.meta ?? {}) as Record<string, unknown>
+  const list = Array.isArray(meta.call_recordings) ? (meta.call_recordings as unknown[]) : []
+  const entry = {
+    id: rec.id,
+    created_at: rec.recorded_at ?? rec.created_at,
+    uploaded_by: rec.uploaded_by,
+    file_path: rec.file_path,
+    file_name: rec.file_name,
+    source: 'auto',
+  }
+  const { error: updErr } = await sb()
+    .from('members')
+    .update({ meta: { ...meta, call_recordings: [entry, ...list] } })
+    .eq('id', memberId)
+  if (updErr) throw updErr
+  const { error: resErr } = await sb()
+    .from('unmatched_call_recordings')
+    .update({ resolved_member_id: memberId, resolved_at: nowIso() })
+    .eq('id', rec.id)
+  if (resErr) throw resErr
+  await insertLog({
+    kind: 'admin',
+    actor,
+    action: 'call_recording.resolve',
+    target_type: 'member',
+    target_id: memberId,
+    meta: { unmatched_id: rec.id },
   })
 }

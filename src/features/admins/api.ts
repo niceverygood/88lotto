@@ -187,3 +187,71 @@ export function useSaveNavAccess() {
     onSuccess: () => qc.invalidateQueries({ queryKey: navAccessKeys.all }),
   })
 }
+
+// ── 통화녹음 자동업로드 미매칭 보관함(현장 피드백 7/3·7/6) ──────────────────────────
+// Android 동반 앱이 전화번호로 회원을 못 찾은 녹음 → 여기서 검색해 수동으로 연결.
+export interface UnmatchedRecording {
+  id: string
+  raw_phone: string
+  normalized_phone: string
+  recorded_at: string | null
+  file_path: string
+  file_name: string
+  uploaded_by: string | null
+  created_at: string
+}
+
+/** mock 모드는 Android 앱 자체가 없어 미매칭 데이터가 생기지 않는다(라이브 전용 기능). */
+export function useUnmatchedRecordings() {
+  return useQuery({
+    queryKey: ['unmatched-call-recordings'],
+    queryFn: async (): Promise<UnmatchedRecording[]> =>
+      dataSource === 'supabase' ? supa.fetchUnmatchedRecordings() : [],
+  })
+}
+
+export function useUnmatchedRecordingUrl() {
+  return useMutation({
+    mutationFn: async (filePath: string) => supa.signUnmatchedRecordingUrl(filePath),
+  })
+}
+
+/** 검색어로 회원 후보 조회(이름/전화/로그인ID) — '회원에게 연결' 드롭다운용, 최대 8건. */
+export interface MemberLite {
+  id: string
+  name: string
+  phone: string
+  user_id: string
+}
+export function useSearchMembersLite(q: string) {
+  return useQuery({
+    queryKey: ['members-lite-search', q],
+    queryFn: async (): Promise<MemberLite[]> => {
+      const needle = q.trim()
+      if (!needle) return []
+      if (dataSource === 'supabase') return supa.searchMembersLite(needle)
+      const lower = needle.toLowerCase()
+      return readDb()
+        .members.filter(
+          (m) => m.name.toLowerCase().includes(lower) || m.phone.includes(needle) || m.user_id.toLowerCase().includes(lower),
+        )
+        .slice(0, 8)
+        .map((m) => ({ id: m.id, name: m.name, phone: m.phone, user_id: m.user_id }))
+    },
+    enabled: q.trim().length > 0,
+  })
+}
+
+/** 미매칭 녹음을 회원에 연결 — 그 회원 meta.call_recordings 에 append + 미매칭 목록에서 제거. */
+export function useResolveUnmatchedRecording() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: { rec: UnmatchedRecording; memberId: string }) => {
+      if (dataSource !== 'supabase') throw new Error('라이브(Supabase) 모드에서만 지원됩니다.')
+      await supa.resolveUnmatchedRecording(v.rec, v.memberId, user?.id ?? null)
+      return v.memberId
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['unmatched-call-recordings'] }),
+  })
+}

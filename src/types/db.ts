@@ -334,6 +334,7 @@ export interface CallRecording {
   transcript?: string | null // STT 전사본(요청 시 생성)
   transcribed_at?: string | null
   keyword_hits?: { keyword: string; count: number }[] // 설정된 특정 단어(예: '보장') 탐지 결과
+  source?: 'manual' | 'auto' // 수동 업로드 vs Android 앱 자동업로드(현장 피드백 7/6) — 미설정=manual 취급
 }
 
 export interface SiteSettings {

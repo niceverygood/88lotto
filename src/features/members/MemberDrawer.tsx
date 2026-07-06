@@ -14,16 +14,18 @@ import {
   type TabItem,
 } from '@/design-system/components'
 import { GRADE_LABEL, PAYMENT_METHOD_LABEL, SMS_TYPE_LABEL } from '@/design-system/labels'
-import { date, datetime, krw, phone } from '@/lib/format'
+import { date, datetime, krw } from '@/lib/format'
 import { useStaff, useTeams } from '@/lib/staff'
 import { useRole } from '@/lib/auth'
 import { koByteLength, classifyMsgType } from '@/lib/oneshot'
 import { homepageId, homepagePw } from '@/lib/homepage'
-import { AGE_BANDS, CONSULT_STATUSES, GENDERS, TENDENCIES } from './views'
+import { AGE_BANDS, COMPLAINT_RESULTS, COMPLAINT_TYPES, CONSULT_STATUSES, GENDERS, TENDENCIES } from './views'
 import type { CallRecording, Grade, WeeklyRecoIssue } from '@/types/db'
 import {
   readCallRecordings,
+  readComplaints,
   readMemos,
+  useAddComplaint,
   useAddMemo,
   useAssignStaff,
   useCallRecordingUrl,
@@ -50,7 +52,7 @@ import type { PaymentMethod } from '@/types/db'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
 // 메모는 별도 탭이 아니라 '기본정보' 탭 최하단에 표시(현장 피드백 7/3).
-type DrawerTab = 'info' | 'payments' | 'sms' | 'assignments' | 'reco' | 'calls'
+type DrawerTab = 'info' | 'payments' | 'sms' | 'assignments' | 'reco' | 'calls' | 'complaints'
 
 function readWeeklyRecos(meta: Record<string, unknown> | undefined): WeeklyRecoIssue[] {
   const list = meta?.weekly_recos as WeeklyRecoIssue[] | undefined
@@ -59,6 +61,9 @@ function readWeeklyRecos(meta: Record<string, unknown> | undefined): WeeklyRecoI
 
 const selectCls =
   'h-8 rounded-md border border-gray-300 bg-white px-2 text-[12px] text-gray-700 outline-none focus:border-primary-500'
+// 기본정보 인라인 수정 입력칸(현장 피드백 7/6) — 평소엔 텍스트처럼 보이다 포커스 시 편집 표시.
+const inlineEditCls =
+  'h-6 w-full rounded border border-transparent bg-transparent px-1 -mx-1 text-[12.5px] text-ink-800 outline-none hover:border-gray-200 focus:border-primary-500 focus:bg-white'
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'bank', label: '무통장' },
@@ -85,6 +90,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const updateMember = useUpdateMember()
   const addMemo = useAddMemo()
   const deleteMemo = useDeleteMemo()
+  const addComplaint = useAddComplaint()
   const assignStaff = useAssignStaff()
   const resetAssign = useResetAssign()
   const sendSms = useSendSms()
@@ -98,6 +104,13 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
 
   const [tab, setTab] = useState<DrawerTab>('info')
   const [memoDraft, setMemoDraft] = useState('')
+  // 기본정보 인라인 수정(현장 피드백 7/6) — 이름/핸드폰
+  const [nameDraft, setNameDraft] = useState('')
+  const [phoneDraft, setPhoneDraft] = useState('')
+  // 민원관리(현장 피드백 7/6)
+  const [complaintBody, setComplaintBody] = useState('')
+  const [complaintType, setComplaintType] = useState<string>(COMPLAINT_TYPES[0])
+  const [complaintResult, setComplaintResult] = useState<string>(COMPLAINT_RESULTS[0])
   const [smsTpl, setSmsTpl] = useState('')
   const [smsBody, setSmsBody] = useState('') // 직접 입력 발송 본문
   const [issueCount, setIssueCount] = useState('') // 수동 발급 세트 수
@@ -117,6 +130,11 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   useEffect(() => {
     setMemoDraft('') // 새 콜메모 입력칸(리스트형 누적) — 회원 전환 시 비움
     setTab('info')
+    setNameDraft(member?.name ?? '')
+    setPhoneDraft(member?.phone ?? '')
+    setComplaintBody('')
+    setComplaintType(COMPLAINT_TYPES[0])
+    setComplaintResult(COMPLAINT_RESULTS[0])
     const d = metaNum(member?.meta, 'weekly_reco_day')
     const c = metaNum(member?.meta, 'weekly_reco_count')
     setSendDay(d === null ? '' : String(d))
@@ -189,6 +207,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
       : []),
     { key: 'reco', label: '발급번호', count: readWeeklyRecos(member.meta).length || undefined },
     { key: 'calls', label: '통화녹음', count: readCallRecordings(member).length || undefined },
+    { key: 'complaints', label: '민원관리', count: readComplaints(member).length || undefined },
   ]
 
   const title = (
@@ -283,13 +302,34 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
 
       {tab === 'info' && (
         <dl className="grid grid-cols-3 gap-x-4 gap-y-3">
-          <Row label="이름">{member.name}</Row>
+          {/* 이름·핸드폰 인라인 수정(현장 피드백 7/6) — 값 바뀌면 blur 시 저장 */}
+          <Row label="이름">
+            <input
+              className={inlineEditCls}
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={() => {
+                const v = nameDraft.trim()
+                if (v && v !== member.name) updateMember.mutate({ id, patch: { name: v } })
+                else setNameDraft(member.name)
+              }}
+            />
+          </Row>
           <Row label="닉네임">{member.nickname ?? '-'}</Row>
           <Row label="로그인 ID" mono>
             {member.user_id}
           </Row>
           <Row label="핸드폰" mono>
-            {phone(member.phone)}
+            <input
+              className={inlineEditCls + ' font-mono tnum'}
+              value={phoneDraft}
+              onChange={(e) => setPhoneDraft(e.target.value)}
+              onBlur={() => {
+                const v = phoneDraft.trim()
+                if (v && v !== member.phone) updateMember.mutate({ id, patch: { phone: v } })
+                else setPhoneDraft(member.phone)
+              }}
+            />
           </Row>
           <Row label="등급">
             <Badge grade={member.grade} />
@@ -940,6 +980,95 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
         </div>
       )}
 
+      {/* 민원관리(현장 피드백 7/6) — 메모+유형(카드/경찰/소보원)+처리결과(성공/실패), 민원횟수=건수 */}
+      {tab === 'complaints' && (
+        <div>
+          <div className="mb-3 rounded-lg border border-danger-bd bg-danger-bg/40 p-2.5">
+            <div className="mb-2 flex items-center justify-between text-[12px] font-bold text-ink-700">
+              <span>민원 등록</span>
+              <span className="text-[11.5px] font-semibold text-danger">
+                민원횟수 {readComplaints(member).length}건
+              </span>
+            </div>
+            <div className="mb-2 flex flex-wrap gap-2">
+              <select
+                className={selectCls}
+                value={complaintType}
+                onChange={(e) => setComplaintType(e.target.value)}
+              >
+                {COMPLAINT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              <select
+                className={selectCls}
+                value={complaintResult}
+                onChange={(e) => setComplaintResult(e.target.value)}
+              >
+                {COMPLAINT_RESULTS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <textarea
+              value={complaintBody}
+              onChange={(e) => setComplaintBody(e.target.value)}
+              rows={3}
+              placeholder="민원 내용을 메모로 남기세요."
+              className="w-full rounded-md border border-gray-300 p-2.5 text-[13px] text-gray-700 outline-none focus:border-primary-500"
+            />
+            <div className="mt-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="dng"
+                disabled={!complaintBody.trim() || addComplaint.isPending}
+                onClick={() =>
+                  addComplaint.mutate(
+                    { id, body: complaintBody, type: complaintType, result: complaintResult },
+                    { onSuccess: () => setComplaintBody('') },
+                  )
+                }
+              >
+                민원 등록
+              </Button>
+            </div>
+          </div>
+
+          <TabList
+            rows={[...readComplaints(member)].reverse()}
+            empty="등록된 민원이 없습니다."
+            render={(c) => (
+              <div key={c.id} className="border-b border-gray-100 py-2.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-gray-600">
+                    {c.type}
+                  </span>
+                  <span
+                    className={
+                      'rounded px-1.5 py-0.5 text-[10.5px] font-semibold ' +
+                      (c.result === '성공' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger')
+                    }
+                  >
+                    {c.result}
+                  </span>
+                  <span className="ml-auto font-mono text-[10.5px] tnum text-gray-400">{datetime(c.created_at)}</span>
+                </div>
+                <p className="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-800">{c.body}</p>
+                {c.author && (
+                  <span className="mt-1 block text-[10.5px] text-gray-400">
+                    · {staffName[c.author] ?? c.author}
+                  </span>
+                )}
+              </div>
+            )}
+          />
+        </div>
+      )}
+
       <ConfirmModal
         open={confirmSuspend}
         onClose={() => setConfirmSuspend(false)}
@@ -1006,7 +1135,17 @@ function CallRecordingRow({
     <div className="border-b border-gray-100 py-2.5">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-[12.5px] font-semibold text-ink-800">{rec.file_name}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="truncate text-[12.5px] font-semibold text-ink-800">{rec.file_name}</p>
+            <span
+              className={
+                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ' +
+                (rec.source === 'auto' ? 'bg-info/10 text-info' : 'bg-gray-100 text-gray-500')
+              }
+            >
+              {rec.source === 'auto' ? '자동' : '수동'}
+            </span>
+          </div>
           <span className="font-mono text-[10.5px] tnum text-gray-400">{datetime(rec.created_at)}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">

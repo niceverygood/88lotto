@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, Pencil, Plus, ShieldCheck, UserPlus } from 'lucide-react'
+import { AlertTriangle, Pencil, PhoneMissed, Plus, ShieldCheck, UserPlus } from 'lucide-react'
 import { Button, ConfirmModal, Drawer, EmptyState, PageHeader, SkeletonRows } from '@/design-system/components'
 import { usePageMeta } from '@/app/uiStore'
 import { useCurrentUser } from '@/lib/auth'
@@ -78,6 +78,9 @@ export function AdminsPage() {
                 <ShieldCheck className="h-4 w-4" /> 권한관리
               </Button>
             )}
+            <Button variant="sec" size="sm" onClick={() => navigate('/admins/recordings')}>
+              <PhoneMissed className="h-4 w-4" /> 미매칭 통화녹음
+            </Button>
             <Button variant="pri" size="sm" onClick={() => setEdit('new')}>
               <Plus className="h-4 w-4" /> 새 계정
             </Button>
