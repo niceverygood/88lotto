@@ -54,6 +54,16 @@ export type ConsultStatus = (typeof CONSULT_STATUSES)[number]
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500, 1000] as const
 export const DEFAULT_PAGE_SIZE = 50
 
+// 성향 — 현장 피드백(2026-07-03): 좋음/보통/나쁨으로 재정의(기존 자유값도 그대로 표시됨, 자유텍스트 컬럼).
+export const TENDENCIES = ['좋음', '보통', '나쁨'] as const
+export type Tendency = (typeof TENDENCIES)[number]
+
+// 연령대·성별 — 현장 피드백(2026-07-03). member.meta.age_band / member.meta.gender 로 저장.
+export const AGE_BANDS = ['40미만', '40~70', '70이상'] as const
+export type AgeBand = (typeof AGE_BANDS)[number]
+export const GENDERS = ['남', '여'] as const
+export type Gender = (typeof GENDERS)[number]
+
 export type ViewGroup = '상태' | '등급' | '담당' | '유입' | '운영'
 
 export interface MemberView {

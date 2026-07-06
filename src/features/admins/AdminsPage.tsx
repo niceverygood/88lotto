@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
-import { Pencil, Plus, ShieldCheck, UserPlus } from 'lucide-react'
+import { AlertTriangle, Pencil, Plus, ShieldCheck, UserPlus } from 'lucide-react'
 import { Button, ConfirmModal, Drawer, EmptyState, PageHeader, SkeletonRows } from '@/design-system/components'
 import { usePageMeta } from '@/app/uiStore'
 import { useCurrentUser } from '@/lib/auth'
@@ -14,7 +14,7 @@ import { useStaff, useTeams } from '@/lib/staff'
 import { datetime } from '@/lib/format'
 import { assignableRoles, canManageStaff, ROLE_LABEL, ROLE_ORDER } from '@/lib/permissions'
 import type { Role, Staff } from '@/types/db'
-import { useSaveStaff, useToggleStaffActive, useTodayDbCounts, type StaffInput } from './api'
+import { useCallVolumeStatus, useSaveStaff, useToggleStaffActive, useTodayDbCounts, type StaffInput } from './api'
 import { dataSource } from '@/lib/supabase'
 import { setStaffPassword } from './supa'
 
@@ -49,6 +49,7 @@ export function AdminsPage() {
   const { data: staff = [], isLoading } = useStaff()
   const { data: teams = [] } = useTeams()
   const { data: todayDb = {} } = useTodayDbCounts()
+  const { data: callVolume } = useCallVolumeStatus()
   const teamName = (id: string | null) => (id ? (teams.find((t) => t.id === id)?.name ?? id) : '—')
 
   const [edit, setEdit] = useState<Staff | 'new' | null>(null)
@@ -83,6 +84,19 @@ export function AdminsPage() {
           </>
         }
       />
+
+      {/* 월 발신 통화량 경고(현장 피드백 7/3) — 상담상태 변경 건수로 근사 집계 */}
+      {callVolume?.over && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-warning-bd bg-warning-bg px-3.5 py-2.5 text-[12.5px] text-ink-700">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <p>
+            이번 달 발신 통화량(상담상태 변경 건수 근사){' '}
+            <b className="font-mono tnum text-warning">{callVolume.count.toLocaleString('ko-KR')}건</b>이 경고 기준{' '}
+            <b className="font-mono tnum">{callVolume.threshold.toLocaleString('ko-KR')}건</b>을 넘었습니다. 기준은{' '}
+            <b>설정 &gt; 사이트 설정 &gt; 통화 녹음·키워드 탐지</b>에서 조정할 수 있습니다.
+          </p>
+        </div>
+      )}
 
       <div className="rounded-lg border border-gray-200 bg-white">
         {isLoading ? (

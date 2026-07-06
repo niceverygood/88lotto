@@ -2,10 +2,10 @@
 // 회차/베팅은 전역 데이터(역할 스코프 없음). '당첨 확정'은 회차 베팅의 등수/당첨금을 산정하고
 // 1~3등 당첨자의 win_history 를 갱신(§8 당첨자 세그먼트) → lotto/bets/members 쿼리 무효화.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Bet, Grade, LogEntry, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
+import type { Bet, Grade, GenerationRecord, LogEntry, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
-import { fetchSiteSettings, fetchTables } from '@/lib/db/remote'
+import { fetchSiteSettings, fetchTables, patchSiteSettings } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
 import { betKeys, lottoKeys, memberKeys, settingsKeys } from '@/lib/queryKeys'
 import { gradeRank, lottoSum, oddEven, prizeForRank, resolveExcludeForGrade } from '@/lib/lotto'
@@ -90,6 +90,55 @@ export function useLottoExclude() {
     queryKey: settingsKeys.site(),
     queryFn: async (): Promise<SiteSettings> =>
       dataSource === 'supabase' ? await fetchSiteSettings() : readDb().site_settings,
+  })
+}
+
+// ── 생성 과정 기록(현장 피드백 7/3 "녹화기능") ─────────────────────────────────
+// 제외수 세팅 검토 중 [추천번호] 미리보기 결과를 증빙(규칙 스냅샷·번호별 제외사유·남은 풀·조합)으로
+// 남긴다. 화면 녹화 대신 생성 과정 자체를 빠짐없이 기록해 특허·불기소이유서 근거자료로 쓸 수 있게 한다.
+export function useSaveGenerationRecord() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (rec: Omit<GenerationRecord, 'id' | 'created_at' | 'created_by'>) => {
+      const full: GenerationRecord = { ...rec, id: genId('genrec'), created_at: nowIso(), created_by: user?.id ?? null }
+      if (dataSource === 'supabase') {
+        const cur = await fetchSiteSettings()
+        await patchSiteSettings(
+          { generation_records: [full, ...(cur.generation_records ?? [])] },
+          user?.id ?? null,
+        )
+        return full
+      }
+      mutateDb((db) => {
+        db.site_settings.generation_records = [full, ...(db.site_settings.generation_records ?? [])]
+      })
+      return full
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.site() }),
+  })
+}
+
+/** 생성기록 삭제(최고관리자 전용 — 호출측에서 역할 가드). */
+export function useDeleteGenerationRecord() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (dataSource === 'supabase') {
+        const cur = await fetchSiteSettings()
+        await patchSiteSettings(
+          { generation_records: (cur.generation_records ?? []).filter((r) => r.id !== id) },
+          user?.id ?? null,
+        )
+        return id
+      }
+      mutateDb((db) => {
+        db.site_settings.generation_records = (db.site_settings.generation_records ?? []).filter((r) => r.id !== id)
+      })
+      return id
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.site() }),
   })
 }
 

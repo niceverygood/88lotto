@@ -4,12 +4,12 @@
 //       쓰기는 mock 의 mutateDb 부수효과(§8)를 supabase 호출로 1:1 미러링한다.
 // TODO(live-verify): 대량(15만) 데이터에서는 목록을 server-side 필터/페이지네이션으로 이관해야 함.
 import { type SupabaseClient } from '@supabase/supabase-js'
-import type { Assignment, LottoRound, Member, MemberStatus, Payment, Product, Role, SiteSettings, SmsSend, SmsTemplate, WeeklyRecoIssue } from '@/types/db'
+import type { Assignment, CallRecording, LottoRound, Member, MemberStatus, Payment, Product, Role, SiteSettings, SmsSend, SmsTemplate, WeeklyRecoIssue } from '@/types/db'
 import { supabase } from '@/lib/supabase'
 import { genId, nowIso } from '@/lib/db/store'
 import { recoSmsBody, renderSms, smsTypeForTemplate } from '@/lib/sms'
 import { sendOneShot } from '@/lib/oneshot'
-import { ID_IN_CHUNK, paginateAll, selectAll, selectByIds, updateByIds } from '@/lib/db/remote'
+import { fetchSiteSettings, ID_IN_CHUNK, paginateAll, selectAll, selectByIds, updateByIds } from '@/lib/db/remote'
 import { mapPool } from '@/lib/async'
 
 // 단체문자 동시 발송 한도(브라우저). 너무 높이면 Fixie 동시연결·OneShot 레이트리밋 위험 → 보수적 6
@@ -215,7 +215,11 @@ export async function createMember(input: MemberCreateInput, actor: string | nul
     is_suspended: false,
     is_deleted: false,
     is_withdrawn: false,
-    meta: dup ? { dup_phone: true } : {},
+    meta: {
+      ...(dup ? { dup_phone: true } : {}),
+      ...(input.age_band ? { age_band: input.age_band } : {}),
+      ...(input.gender ? { gender: input.gender } : {}),
+    },
   }
   const { error } = await sb().from('members').insert(row)
   if (error) throw error
@@ -444,6 +448,109 @@ export async function deleteMemo(id: string, memoId: string, actor: string | nul
   const { error } = await sb().from('members').update({ meta: { ...meta, memos: list }, memo: latest }).eq('id', id)
   if (error) throw error
   await pushLog({ kind: 'admin', actor, action: 'member.memo_delete', target_type: 'member', target_id: id, meta: { memo_id: memoId } })
+}
+
+// ── 통화 녹음(현장 피드백 7/3, 김형준 이사) — meta.call_recordings 에 리스트로 적재 ──────
+// 1단계: 상담원 수동 업로드(Storage 버킷 call-recordings). PBX/통신사 자동연동은 정보 확보 후 별도 추가.
+async function patchCallRecordings(
+  id: string,
+  fn: (list: CallRecording[]) => CallRecording[],
+): Promise<void> {
+  const { data: cur } = await sb().from('members').select('meta').eq('id', id).maybeSingle()
+  const meta = ((cur as { meta: Record<string, unknown> } | null)?.meta ?? {}) as Record<string, unknown>
+  const list = Array.isArray(meta.call_recordings) ? (meta.call_recordings as CallRecording[]) : []
+  const { error } = await sb()
+    .from('members')
+    .update({ meta: { ...meta, call_recordings: fn(list) } })
+    .eq('id', id)
+  if (error) throw error
+}
+
+/** 녹음 파일을 Storage(call-recordings)에 업로드하고 member.meta.call_recordings 에 append. */
+export async function uploadCallRecording(id: string, file: File, actor: string | null): Promise<CallRecording> {
+  const entry: CallRecording = {
+    id: genId('rec'),
+    created_at: nowIso(),
+    uploaded_by: actor,
+    file_path: `${id}/${genId('rec')}_${file.name}`,
+    file_name: file.name,
+  }
+  const { error: upErr } = await sb().storage.from('call-recordings').upload(entry.file_path, file)
+  if (upErr) throw upErr
+  await patchCallRecordings(id, (list) => [entry, ...list])
+  await pushLog({
+    kind: 'admin',
+    actor,
+    action: 'member.call_recording_upload',
+    target_type: 'member',
+    target_id: id,
+    meta: { file_name: file.name },
+  })
+  return entry
+}
+
+/** 녹음 재생용 서명 URL(비공개 버킷이라 매번 발급, 1시간 유효). */
+export async function signCallRecordingUrl(filePath: string): Promise<string> {
+  const { data, error } = await sb().storage.from('call-recordings').createSignedUrl(filePath, 3600)
+  if (error) throw error
+  return data.signedUrl
+}
+
+/** 녹음 삭제(파일 + meta 항목). */
+export async function deleteCallRecording(id: string, recId: string, filePath: string, actor: string | null): Promise<void> {
+  await sb().storage.from('call-recordings').remove([filePath])
+  await patchCallRecordings(id, (list) => list.filter((r) => r.id !== recId))
+  await pushLog({
+    kind: 'admin',
+    actor,
+    action: 'member.call_recording_delete',
+    target_type: 'member',
+    target_id: id,
+    meta: { rec_id: recId },
+  })
+}
+
+/** STT 전사 결과 + 키워드 탐지 결과를 해당 녹음 항목에 반영. */
+export async function saveCallRecordingTranscript(
+  id: string,
+  recId: string,
+  transcript: string,
+  keywordHits: { keyword: string; count: number }[],
+): Promise<void> {
+  await patchCallRecordings(id, (list) =>
+    list.map((r) => (r.id === recId ? { ...r, transcript, transcribed_at: nowIso(), keyword_hits: keywordHits } : r)),
+  )
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** STT 전사(/api/transcribe-call, OpenAI) 호출 → 전사본 + 키워드(설정>사이트 설정) 탐지 결과 저장. */
+export async function transcribeCallRecording(
+  id: string,
+  recId: string,
+  filePath: string,
+): Promise<{ transcript: string; keywordHits: { keyword: string; count: number }[] }> {
+  const { data } = await sb().auth.getSession()
+  const token = data.session?.access_token
+  if (!token) throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.')
+  const [r, settings] = await Promise.all([
+    fetch('/api/transcribe-call', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ file_path: filePath }),
+    }),
+    fetchSiteSettings(),
+  ])
+  const j = (await r.json().catch(() => ({}))) as { ok?: boolean; transcript?: string; message?: string }
+  if (!r.ok || !j.ok || typeof j.transcript !== 'string') throw new Error(j.message ?? '전사에 실패했습니다.')
+  const keywords = settings.call_keywords ?? ['보장']
+  const keywordHits = keywords
+    .map((k) => ({ keyword: k, count: (j.transcript!.match(new RegExp(escapeRegExp(k), 'g')) ?? []).length }))
+    .filter((h) => h.count > 0)
+  await saveCallRecordingTranscript(id, recId, j.transcript, keywordHits)
+  return { transcript: j.transcript, keywordHits }
 }
 
 export async function bulkUpdateMembers(

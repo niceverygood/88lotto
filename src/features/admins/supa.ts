@@ -4,8 +4,9 @@
 // TODO(live-verify): 라이브 운영자 생성은 Supabase auth.users 연결(auth_user_id)이 별도로 필요.
 import type { Role, Staff } from '@/types/db'
 import { genId } from '@/lib/db/store'
-import { insertLog, sb } from '@/lib/db/remote'
+import { fetchSiteSettings, insertLog, sb } from '@/lib/db/remote'
 import type { NavAccessMap } from '@/lib/permissions'
+import { CALL_VOLUME_ALERT_DEFAULT, tallyCallVolume, type CallVolumeStatus } from '@/lib/callVolume'
 import { tallyTodayDb, type StaffInput, type TodayDbCount } from './api'
 
 /** 금일(오늘 0시~) 배정 이력을 staff 별 {전체/수동/자동} 으로 집계. */
@@ -20,6 +21,23 @@ export async function fetchTodayDbCounts(): Promise<Record<string, TodayDbCount>
   return tallyTodayDb(
     (data ?? []) as { staff_id: string | null; type: 'manual' | 'auto'; created_at: string }[],
   )
+}
+
+/** 이번 달 발신 통화량(상담상태 변경 건수 근사) + 경고 임계치(현장 피드백 7/3). */
+export async function fetchCallVolumeStatus(): Promise<CallVolumeStatus> {
+  const start = new Date()
+  start.setDate(1)
+  start.setHours(0, 0, 0, 0)
+  const [{ data, error }, settings] = await Promise.all([
+    sb().from('logs').select('action, created_at, meta').eq('action', 'member.update').gte('created_at', start.toISOString()),
+    fetchSiteSettings(),
+  ])
+  if (error) throw error
+  const count = tallyCallVolume(
+    (data ?? []) as { action: string; created_at: string; meta?: Record<string, unknown> }[],
+  )
+  const threshold = settings.call_volume_alert_threshold ?? CALL_VOLUME_ALERT_DEFAULT
+  return { count, threshold, over: count > threshold }
 }
 
 // 운영자 Auth 비밀번호 설정/생성 — 서버 함수(/api/staff-set-password, service_role) 호출.

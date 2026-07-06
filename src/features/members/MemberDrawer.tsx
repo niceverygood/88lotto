@@ -1,8 +1,8 @@
 // 회원 상세 Drawer — §8 교차연동 허브. 탭(기본정보·결제내역·문자내역·배정이력·메모) +
 // 액션(등급변경·담당변경·정지·아웃콜·문자발송). 모든 액션은 api 뮤테이션 →
 // 관련 쿼리 무효화 + 로그/배정/문자 부수효과를 만든다.
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { CreditCard, Dices, MessageSquare, Send } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { CreditCard, Dices, Mic, MessageSquare, Play, Send, Sparkles, Trash2, Upload } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -19,12 +19,15 @@ import { useStaff, useTeams } from '@/lib/staff'
 import { useRole } from '@/lib/auth'
 import { koByteLength, classifyMsgType } from '@/lib/oneshot'
 import { homepageId, homepagePw } from '@/lib/homepage'
-import { CONSULT_STATUSES } from './views'
-import type { Grade, WeeklyRecoIssue } from '@/types/db'
+import { AGE_BANDS, CONSULT_STATUSES, GENDERS, TENDENCIES } from './views'
+import type { CallRecording, Grade, WeeklyRecoIssue } from '@/types/db'
 import {
+  readCallRecordings,
   readMemos,
   useAddMemo,
   useAssignStaff,
+  useCallRecordingUrl,
+  useDeleteCallRecording,
   useDeleteMemo,
   useManualIssueReco,
   useMember,
@@ -37,14 +40,17 @@ import {
   useSendCustomSms,
   useSendSms,
   useSmsTemplates,
+  useTranscribeCallRecording,
   useUpdateMember,
   useUpdateMemberSettings,
+  useUploadCallRecording,
   type ResetMemo,
 } from './api'
 import type { PaymentMethod } from '@/types/db'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
-type DrawerTab = 'info' | 'payments' | 'sms' | 'assignments' | 'memo' | 'reco'
+// 메모는 별도 탭이 아니라 '기본정보' 탭 최하단에 표시(현장 피드백 7/3).
+type DrawerTab = 'info' | 'payments' | 'sms' | 'assignments' | 'reco' | 'calls'
 
 function readWeeklyRecos(meta: Record<string, unknown> | undefined): WeeklyRecoIssue[] {
   const list = meta?.weekly_recos as WeeklyRecoIssue[] | undefined
@@ -86,6 +92,9 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const manualIssue = useManualIssueReco()
   const requestPayment = useRequestPayment()
   const updateSettings = useUpdateMemberSettings()
+  const uploadCallRec = useUploadCallRecording()
+  const deleteCallRec = useDeleteCallRecording()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [tab, setTab] = useState<DrawerTab>('info')
   const [memoDraft, setMemoDraft] = useState('')
@@ -170,7 +179,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   }
   const id = member.id
 
-  // 배정이력은 최고관리자만(현장 피드백 <회원정보창> 6). 메모 카운트=삭제분 제외.
+  // 배정이력은 최고관리자만(현장 피드백 <회원정보창> 6). 메모는 기본정보 탭 하단에 통합(현장 피드백 7/3).
   const tabs: TabItem[] = [
     { key: 'info', label: '기본정보' },
     { key: 'payments', label: '결제내역', count: payments.length },
@@ -178,8 +187,8 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     ...(role === 'admin'
       ? [{ key: 'assignments', label: '배정이력', count: assignments.length } as TabItem]
       : []),
-    { key: 'memo', label: '메모', count: readMemos(member).filter((x) => !x.deleted_at).length || undefined },
     { key: 'reco', label: '발급번호', count: readWeeklyRecos(member.meta).length || undefined },
+    { key: 'calls', label: '통화녹음', count: readCallRecordings(member).length || undefined },
   ]
 
   const title = (
@@ -273,7 +282,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
       <Tabs tabs={tabs} value={tab} onChange={(k) => setTab(k as DrawerTab)} className="mb-4" />
 
       {tab === 'info' && (
-        <dl className="grid grid-cols-2 gap-x-5 gap-y-3">
+        <dl className="grid grid-cols-3 gap-x-4 gap-y-3">
           <Row label="이름">{member.name}</Row>
           <Row label="닉네임">{member.nickname ?? '-'}</Row>
           <Row label="로그인 ID" mono>
@@ -288,7 +297,49 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
           <Row label="상태">
             <StatusChip status={member.status} />
           </Row>
-          <Row label="성향">{member.tendency ?? '-'}</Row>
+          {/* 연령대·성별·성향 선택형(현장 피드백 7/3) — 즉시 저장 */}
+          <Row label="연령대">
+            <select
+              className={selectCls}
+              value={metaStr(member.meta, 'age_band')}
+              onChange={(e) => updateSettings.mutate({ id, patch: { age_band: e.target.value || null } })}
+            >
+              <option value="">미지정</option>
+              {AGE_BANDS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </Row>
+          <Row label="성별">
+            <select
+              className={selectCls}
+              value={metaStr(member.meta, 'gender')}
+              onChange={(e) => updateSettings.mutate({ id, patch: { gender: e.target.value || null } })}
+            >
+              <option value="">미지정</option>
+              {GENDERS.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          </Row>
+          <Row label="성향">
+            <select
+              className={selectCls}
+              value={member.tendency ?? ''}
+              onChange={(e) => updateMember.mutate({ id, patch: { tendency: e.target.value || null } })}
+            >
+              <option value="">미지정</option>
+              {TENDENCIES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </Row>
           <Row label="상담상태">{member.consult_status ?? '-'}</Row>
           <Row label="아웃콜">{member.outcall_done ? '완료' : '미처리'}</Row>
           {/* 유입코드/유입구분은 최고관리자만(현장 피드백) */}
@@ -639,8 +690,15 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
         />
       )}
 
-      {tab === 'memo' && (
-        <div>
+      {/* 메모 — 별도 탭이 아니라 기본정보 탭 최하단(현장 피드백 7/3) */}
+      {tab === 'info' && (
+        <div className="mt-4 border-t border-gray-200 pt-4">
+          <div className="mb-2.5 text-[12px] font-bold text-gray-600">
+            메모{' '}
+            <span className="font-normal text-gray-400">
+              · {readMemos(member).filter((x) => !x.deleted_at).length}건
+            </span>
+          </div>
           {/* 새 콜메모 추가 — 리스트형 누적(현장 피드백) */}
           <textarea
             value={memoDraft}
@@ -837,6 +895,51 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
         </div>
       )}
 
+      {/* 통화녹음(현장 피드백 7/3, 김형준 이사) — 상담원 수동 업로드 + STT 전사·키워드 탐지 */}
+      {tab === 'calls' && (
+        <div>
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+            <Mic className="h-4 w-4 text-gray-500" />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) uploadCallRec.mutate({ id, file })
+                e.target.value = ''
+              }}
+            />
+            <Button
+              size="sm"
+              variant="sec"
+              icon={<Upload className="h-3.5 w-3.5" />}
+              disabled={uploadCallRec.isPending}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploadCallRec.isPending ? '업로드 중…' : '녹음 파일 업로드'}
+            </Button>
+            <span className="text-[11.5px] text-gray-400">
+              통화 후 녹음 파일을 직접 업로드합니다. 텍스트 변환은 라이브 서버에서만 동작합니다.
+            </span>
+          </div>
+          <TabList
+            rows={readCallRecordings(member)}
+            empty="업로드된 통화 녹음이 없습니다."
+            render={(r) => (
+              <CallRecordingRow
+                key={r.id}
+                memberId={id}
+                rec={r}
+                canDelete={role === 'admin'}
+                onDelete={() => deleteCallRec.mutate({ id, recId: r.id, filePath: r.file_path })}
+              />
+            )}
+          />
+        </div>
+      )}
+
       <ConfirmModal
         open={confirmSuspend}
         onClose={() => setConfirmSuspend(false)}
@@ -880,4 +983,88 @@ function TabList<T>({
     return <div className="py-10 text-center text-[12.5px] text-gray-400">{empty}</div>
   }
   return <div>{rows.map(render)}</div>
+}
+
+// 통화녹음 1건 — 재생(서명 URL 발급) + 텍스트 변환(STT, 라이브 전용) + 삭제.
+function CallRecordingRow({
+  memberId,
+  rec,
+  canDelete,
+  onDelete,
+}: {
+  memberId: string
+  rec: CallRecording
+  canDelete: boolean
+  onDelete: () => void
+}) {
+  const getUrl = useCallRecordingUrl()
+  const transcribe = useTranscribeCallRecording()
+  const [playUrl, setPlayUrl] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  return (
+    <div className="border-b border-gray-100 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-[12.5px] font-semibold text-ink-800">{rec.file_name}</p>
+          <span className="font-mono text-[10.5px] tnum text-gray-400">{datetime(rec.created_at)}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            size="sm"
+            variant="sec"
+            icon={<Play className="h-3.5 w-3.5" />}
+            disabled={getUrl.isPending}
+            onClick={() => getUrl.mutate(rec.file_path, { onSuccess: setPlayUrl })}
+          >
+            재생
+          </Button>
+          <Button
+            size="sm"
+            variant="sec"
+            icon={<Sparkles className="h-3.5 w-3.5" />}
+            disabled={transcribe.isPending}
+            onClick={() => {
+              setErr(null)
+              transcribe.mutate(
+                { id: memberId, recId: rec.id, filePath: rec.file_path },
+                { onError: (e) => setErr(e instanceof Error ? e.message : '전사에 실패했습니다.') },
+              )
+            }}
+          >
+            {rec.transcript ? '다시 변환' : '텍스트 변환'}
+          </Button>
+          {canDelete && (
+            <button
+              type="button"
+              title="삭제"
+              onClick={onDelete}
+              className="rounded p-1.5 text-gray-400 hover:bg-danger-bg hover:text-danger"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+      {playUrl && <audio className="mt-2 w-full" controls src={playUrl} />}
+      {err && <p className="mt-1.5 text-[11.5px] text-danger">{err}</p>}
+      {rec.transcript && (
+        <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-2.5">
+          <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-gray-700">{rec.transcript}</p>
+          {rec.keyword_hits && rec.keyword_hits.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {rec.keyword_hits.map((h) => (
+                <span
+                  key={h.keyword}
+                  className="rounded-full bg-warning-bg px-2 py-0.5 text-[10.5px] font-semibold text-warning"
+                >
+                  ‘{h.keyword}’ {h.count}회
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }

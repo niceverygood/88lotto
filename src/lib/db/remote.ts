@@ -104,6 +104,21 @@ export async function fetchSiteSettings(): Promise<SiteSettings> {
   return data as SiteSettings
 }
 
+/** site_settings 특정 컬럼만 부분 갱신(전체 오버라이트 없음) — 여러 기능이 각자 안전하게 부분 저장할 때 사용
+ *  (예: features/lotto 의 생성기록 저장이 features/settings 의 전체 설정 저장 경로를 거치지 않도록, §2 feature 간 import 회피). */
+export async function patchSiteSettings(patch: Partial<SiteSettings>, actor: string | null): Promise<void> {
+  const { error } = await sb().from('site_settings').update(patch).eq('id', 1)
+  if (error) throw error
+  await insertLog({
+    kind: 'admin',
+    actor,
+    action: 'settings.update',
+    target_type: 'site_settings',
+    target_id: null,
+    meta: { keys: Object.keys(patch) },
+  })
+}
+
 /** 로그 1건 적재(§8 감사). mock 의 db.logs.push 미러. */
 export async function insertLog(row: {
   kind: LogKind

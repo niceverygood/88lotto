@@ -9,7 +9,7 @@ import { GRADE_LABEL } from '@/design-system/labels'
 import { useStaff } from '@/lib/staff'
 import type { Grade } from '@/types/db'
 import { useCreateMember } from './api'
-import { CONSULT_STATUSES, INFLOW_TYPES } from './views'
+import { AGE_BANDS, CONSULT_STATUSES, GENDERS, INFLOW_TYPES, TENDENCIES } from './views'
 
 const inputCls =
   'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-800 outline-none focus:border-primary-500'
@@ -19,7 +19,6 @@ const labelCls = 'mb-1.5 block text-[12px] font-semibold text-gray-600'
 const errCls = 'mt-1 text-[11.5px] text-danger'
 
 const GRADES: Grade[] = ['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']
-const TENDENCIES = ['적극', '보통', '신중', '무응답']
 // 유입경로(채널) 프리셋 — inflow_code(채널)만 채운다. 유입구분(콜 단계)은 별도 선택.
 const INFLOW_CODE_PRESETS = [
   { code: 'NAVER', label: '네이버검색' },
@@ -37,6 +36,8 @@ const schema = z.object({
   inflow_type: z.string(),
   consult_status: z.string(),
   tendency: z.string(),
+  age_band: z.string(),
+  gender: z.string(),
   grade: z.enum(['simple', 'free', 'gold', 'goldp', 'vip', 'royal', 'ovr', 'toss']),
   assigned_staff_id: z.string(),
   nickname: z.string(),
@@ -63,6 +64,8 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
       inflow_type: INFLOW_TYPES[0], // 신규
       consult_status: CONSULT_STATUSES[0], // 신규
       tendency: '',
+      age_band: '',
+      gender: '',
       grade: 'free',
       assigned_staff_id: '',
       nickname: '',
@@ -86,6 +89,8 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
         inflow_type: v.inflow_type || null,
         consult_status: v.consult_status || null,
         tendency: v.tendency || null,
+        age_band: v.age_band || null,
+        gender: v.gender || null,
         memo: v.memo || null,
         assigned_staff_id: v.assigned_staff_id || null,
       },
@@ -145,6 +150,31 @@ export function MemberCreateDrawer({ onClose }: { onClose: () => void }) {
               {TENDENCIES.map((t) => (
                 <option key={t} value={t}>
                   {t}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>연령대</label>
+            <select className={inputCls} {...register('age_band')}>
+              <option value="">미지정</option>
+              {AGE_BANDS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>성별</label>
+            <select className={inputCls} {...register('gender')}>
+              <option value="">미지정</option>
+              {GENDERS.map((g) => (
+                <option key={g} value={g}>
+                  {g}
                 </option>
               ))}
             </select>

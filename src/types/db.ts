@@ -306,6 +306,36 @@ export interface MembershipTier {
   terms: string // 등급별 개별약관(개별약관서) — 비우면 미노출
 }
 
+// 조합 생성 과정 기록(현장 피드백 7/3 "녹화기능") — 제외수 세팅 검토 중 [추천번호] 미리보기에서
+// 저장하면, 규칙 스냅샷·번호별 제외사유·남은 풀·최종 조합을 통째로 남긴다(특허·불기소이유서 근거자료).
+export interface GenerationRecord {
+  id: string
+  created_at: string
+  created_by: string | null
+  grade: Grade | null // 대상 등급(null=공통)
+  target_round: number
+  mode: number // 제외수 개수
+  fixed: number[]
+  excluded: number[]
+  reasons: { number: number; rule: string }[] // 번호별 제외 사유(규칙 키)
+  pool: number[] // 남은 풀
+  sets: number[][] // 생성된 추천 조합
+  note?: string // 운영자 메모(선택)
+}
+
+// 통화 녹음 1건(현장 피드백 7/3, 김형준 이사) — member.meta.call_recordings[] 에 적재.
+// 1단계: 법인폰/PBX 자동연동 정보가 없어 상담원 수동 업로드로 시작(Storage 버킷 call-recordings).
+export interface CallRecording {
+  id: string
+  created_at: string
+  uploaded_by: string | null
+  file_path: string // storage 'call-recordings' 버킷 내 경로
+  file_name: string
+  transcript?: string | null // STT 전사본(요청 시 생성)
+  transcribed_at?: string | null
+  keyword_hits?: { keyword: string; count: number }[] // 설정된 특정 단어(예: '보장') 탐지 결과
+}
+
 export interface SiteSettings {
   bank: BankTransferSettings
   grade_colors: GradeColorMap
@@ -315,8 +345,11 @@ export interface SiteSettings {
   report: ReportSettings
   lotto_exclude: LottoExcludeSettings // 현재 적용 스냅샷(폴백)
   lotto_exclude_history: LottoExcludeRule[] // 회차별 이력 + 효력일자(§V2-5)
+  call_keywords?: string[] // 통화 녹음 자동탐지 특정 단어(예: '보장') — 현장 피드백 7/3
+  call_volume_alert_threshold?: number // 월 발신 통화량(상담상태 변경 건수) 경고 기준 — 현장 피드백 7/3, 기본 1000
   weekly_free_reco: WeeklyFreeRecoSettings // 무료회원 주간 자동발급(현장 피드백)
   terms: string // 이용약관 본문(공통/기본)
   terms_by_grade?: Partial<Record<Grade, string>> // 등급별 약관(현장 피드백 6/11) — 미설정 등급은 공통 폴백
   membership_tiers?: MembershipTier[] // 멤버십 등급 카드(전산 편집 → 고객 연동, 6/30) — 미설정 시 코드 기본값 폴백
+  generation_records?: GenerationRecord[] // 조합 생성 과정 기록(현장 피드백 7/3) — 미설정 시 빈 배열
 }

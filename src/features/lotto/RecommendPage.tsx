@@ -3,7 +3,19 @@
 // §8 외 부수효과 없음(읽기·계산 전용). 확률 향상 단언 없이 사실대로 안내.
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BookOpen, Check, ChevronDown, Dices, Gift, Info, RefreshCw, Settings as SettingsIcon } from 'lucide-react'
+import {
+  BookOpen,
+  Check,
+  ChevronDown,
+  Dices,
+  FileDown,
+  Gift,
+  Info,
+  RefreshCw,
+  Save,
+  Settings as SettingsIcon,
+  Trash2,
+} from 'lucide-react'
 import { Button, ConfirmModal, LottoBalls, PageHeader } from '@/design-system/components'
 import { usePageMeta } from '@/app/uiStore'
 import { useRole } from '@/lib/auth'
@@ -11,7 +23,8 @@ import { cn } from '@/lib/cn'
 import { datetime, num } from '@/lib/format'
 import { lottoSum, oddEven, LOTTO_RULE_GRADES } from '@/lib/lotto'
 import { GRADE_LABEL } from '@/design-system/labels'
-import type { Grade } from '@/types/db'
+import { useStaff } from '@/lib/staff'
+import type { Grade, GenerationRecord } from '@/types/db'
 import {
   EXCLUSION_MODE_MAX,
   EXCLUSION_MODE_MIN,
@@ -25,9 +38,11 @@ import {
 } from '@/lib/lottoGenerator'
 import {
   resolveExcludeForGrade,
+  useDeleteGenerationRecord,
   useIssueGradeReco,
   useLottoExclude,
   useRounds,
+  useSaveGenerationRecord,
   useWeeklyRecoStatus,
   WEEKLY_FREE_RECO_DEFAULT,
 } from './api'
@@ -90,6 +105,16 @@ export function RecommendPage() {
   const [result, setResult] = useState<GenerateResult | null>(null)
   const [showMethod, setShowMethod] = useState(false)
 
+  // 생성 과정 기록(현장 피드백 7/3 "녹화기능") — 미리보기 결과를 증빙으로 저장/열람.
+  const { data: staff = [] } = useStaff()
+  const staffName = useMemo(() => Object.fromEntries(staff.map((s) => [s.id, s.name])), [staff])
+  const records = settings?.generation_records ?? []
+  const saveRecord = useSaveGenerationRecord()
+  const deleteRecord = useDeleteGenerationRecord()
+  const [showRecords, setShowRecords] = useState(false)
+  const [savedMsg, setSavedMsg] = useState(false)
+  const [deleteRecId, setDeleteRecId] = useState<string | null>(null)
+
   // 선택 등급에 적용되는 고정/제외(등급 규칙 없으면 공통 → 레거시 폴백).
   const exclude = useMemo(
     () => (settings ? resolveExcludeForGrade(settings, grade) : null),
@@ -108,6 +133,7 @@ export function RecommendPage() {
   function onGenerate() {
     if (!exclude) return
     setResult(generateRecommendation(rounds, exclude, { mode, setCount }))
+    setSavedMsg(false)
   }
 
   return (
@@ -370,14 +396,100 @@ export function RecommendPage() {
         >
           {result ? '다시 생성' : '번호 생성'}
         </Button>
+        {/* 생성 과정 기록(현장 피드백 7/3) — 미리보기 결과를 증빙으로 저장 */}
+        {result && canIssue && (
+          <Button
+            variant="sec"
+            icon={<Save className="h-4 w-4" />}
+            disabled={saveRecord.isPending}
+            onClick={() =>
+              saveRecord.mutate(
+                {
+                  grade,
+                  target_round: result.targetRound,
+                  mode: result.mode,
+                  fixed: result.fixed,
+                  excluded: result.excluded,
+                  reasons: result.reasons,
+                  pool: result.pool,
+                  sets: result.sets,
+                },
+                {
+                  onSuccess: () => {
+                    setSavedMsg(true)
+                    setShowRecords(true)
+                  },
+                },
+              )
+            }
+          >
+            기록 저장
+          </Button>
+        )}
         {!ready && (
           <span className="text-[12px] text-gray-400">
             {isLoading ? '회차 데이터 불러오는 중…' : '회차 데이터가 없어 생성할 수 없습니다.'}
           </span>
         )}
+        {savedMsg && <span className="text-[12px] font-semibold text-success">생성 기록에 저장했습니다.</span>}
       </div>
 
       {result && <ResultView result={result} ruleByNumber={ruleByNumber} />}
+
+      {/* 생성 기록(현장 피드백 7/3 "녹화기능") — 화면 녹화 대신 생성 과정 자체를 증빙으로 남긴다 */}
+      <div className="mt-4 overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <button
+          type="button"
+          onClick={() => setShowRecords((v) => !v)}
+          aria-expanded={showRecords}
+          className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-gray-50"
+        >
+          <FileDown className="h-4 w-4 shrink-0 text-primary-600" />
+          <span className="text-[13px] font-bold text-ink-900">
+            생성 기록 <span className="font-mono tnum text-gray-400">({records.length})</span>
+          </span>
+          <span className="ml-auto text-[11.5px] text-gray-400">{showRecords ? '접기' : '펼치기'}</span>
+          <ChevronDown
+            className={cn('h-4 w-4 shrink-0 text-gray-400 transition-transform', showRecords && 'rotate-180')}
+          />
+        </button>
+        {showRecords && (
+          <div className="border-t border-gray-100 px-4 py-3.5">
+            <p className="mb-3 text-[11.5px] text-gray-500">
+              제외수 세팅 검토 중 저장한 생성 과정 기록입니다. 규칙 스냅샷·번호별 제외사유·남은
+              풀·최종 조합을 그대로 보관해 증빙(특허·불기소이유서 근거자료)으로 쓸 수 있습니다.
+            </p>
+            {records.length === 0 ? (
+              <p className="py-6 text-center text-[12.5px] text-gray-400">
+                저장된 생성 기록이 없습니다. 위에서 번호 생성 후 ‘기록 저장’을 눌러주세요.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {records.map((r) => (
+                  <GenerationRecordRow
+                    key={r.id}
+                    record={r}
+                    staffName={staffName}
+                    canDelete={role === 'admin'}
+                    onDelete={() => setDeleteRecId(r.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+
+      <ConfirmModal
+        open={deleteRecId != null}
+        onClose={() => setDeleteRecId(null)}
+        onConfirm={() => deleteRecId && deleteRecord.mutate(deleteRecId, { onSuccess: () => setDeleteRecId(null) })}
+        title="생성 기록 삭제"
+        description="이 생성 기록을 삭제합니다. 증빙 자료이므로 신중히 진행하세요. 되돌릴 수 없습니다."
+        confirmText="삭제"
+        tone="danger"
+        loading={deleteRecord.isPending}
+      />
     </div>
   )
 }
@@ -520,6 +632,109 @@ function ResultView({
         )}
       </div>
     </div>
+  )
+}
+
+// 생성 기록 1건 — 요약 행 + 펼치면 번호별 제외사유·풀·조합 전체, JSON 내보내기(증빙용).
+function GenerationRecordRow({
+  record,
+  staffName,
+  canDelete,
+  onDelete,
+}: {
+  record: GenerationRecord
+  staffName: Record<string, string>
+  canDelete: boolean
+  onDelete: () => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  function download() {
+    const blob = new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `생성기록_${record.target_round}회_${record.created_at.slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <li className="rounded-md border border-gray-200 bg-gray-50">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform', open && 'rotate-180')} />
+          <span className="font-mono text-[12.5px] font-bold tnum text-ink-800">{record.target_round}회</span>
+          <span className="rounded bg-primary-50 px-1.5 py-0.5 text-[11px] font-semibold text-primary-700">
+            {record.grade == null ? '공통(전체)' : GRADE_LABEL[record.grade]}
+          </span>
+          <span className="text-[11.5px] text-gray-500">
+            제외 {record.excluded.length} · 풀 {record.pool.length} · {record.sets.length}세트
+          </span>
+        </button>
+        <span className="font-mono text-[10.5px] tnum text-gray-400">{datetime(record.created_at)}</span>
+        {record.created_by && (
+          <span className="text-[11px] text-gray-400">
+            {staffName[record.created_by] ?? record.created_by}
+          </span>
+        )}
+        <button
+          type="button"
+          title="JSON 다운로드"
+          onClick={download}
+          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
+        >
+          <FileDown className="h-3.5 w-3.5" />
+        </button>
+        {canDelete && (
+          <button
+            type="button"
+            title="삭제"
+            onClick={onDelete}
+            className="rounded p-1 text-gray-400 hover:bg-danger-bg hover:text-danger"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="space-y-2 border-t border-gray-200 px-3 py-2.5 text-[11.5px] text-gray-600">
+          <div>
+            <span className="font-semibold text-gray-500">고정수</span>{' '}
+            <span className="font-mono tnum">{record.fixed.length ? record.fixed.join(', ') : '—'}</span>
+          </div>
+          <div>
+            <span className="font-semibold text-gray-500">제외수({record.mode})</span>{' '}
+            <span className="font-mono tnum">{record.excluded.join(', ')}</span>
+          </div>
+          <div>
+            <span className="font-semibold text-gray-500">번호별 사유</span>{' '}
+            <span className="font-mono tnum">
+              {record.reasons.map((r) => `${r.number}(${EXCLUSION_RULE_LABEL[r.rule as ExclusionRuleKey] ?? r.rule})`).join(', ')}
+            </span>
+          </div>
+          <div>
+            <span className="font-semibold text-gray-500">남은 풀</span>{' '}
+            <span className="font-mono tnum">{record.pool.join(', ')}</span>
+          </div>
+          <div className="space-y-1">
+            <span className="font-semibold text-gray-500">조합</span>
+            <ul className="space-y-1 pl-1">
+              {record.sets.map((s, i) => (
+                <li key={i} className="flex items-center gap-2">
+                  <span className="w-4 shrink-0 font-mono tnum">{i + 1}</span>
+                  <LottoBalls numbers={s} size="sm" />
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </li>
   )
 }
 

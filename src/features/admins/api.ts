@@ -8,6 +8,7 @@ import { dataSource } from '@/lib/supabase'
 import { useCurrentUser } from '@/lib/auth'
 import { staffKeys } from '@/lib/staff'
 import * as supa from './supa'
+import { CALL_VOLUME_ALERT_DEFAULT, tallyCallVolume } from '@/lib/callVolume'
 import { navAccessKeys } from '@/lib/navAccess'
 import { assignableRoles, canManageStaff, type NavAccessMap } from '@/lib/permissions'
 
@@ -81,6 +82,20 @@ export function useTodayDbCounts() {
     queryFn: async (): Promise<Record<string, TodayDbCount>> => {
       if (dataSource === 'supabase') return supa.fetchTodayDbCounts()
       return tallyTodayDb(readDb().assignments)
+    },
+  })
+}
+
+/** 이번 달 발신 통화량(상담상태 변경 건수 근사) + 경고 임계치(현장 피드백 7/3). */
+export function useCallVolumeStatus() {
+  return useQuery({
+    queryKey: ['call-volume-status'],
+    queryFn: async () => {
+      if (dataSource === 'supabase') return supa.fetchCallVolumeStatus()
+      const db = readDb()
+      const count = tallyCallVolume(db.logs)
+      const threshold = db.site_settings.call_volume_alert_threshold ?? CALL_VOLUME_ALERT_DEFAULT
+      return { count, threshold, over: count > threshold }
     },
   })
 }

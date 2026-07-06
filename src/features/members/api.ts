@@ -2,7 +2,7 @@
 // 컴포넌트 직접 fetch 금지. 뮤테이션은 mock DB 를 변경하고 §8 흐름대로
 // 로그/배정/문자 부수효과를 만든 뒤 관련 쿼리를 무효화한다.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Grade, LogEntry, Member, MemberStatus, Payment, PaymentMethod, Role, SmsSend, Staff, WeeklyRecoIssue } from '@/types/db'
+import type { CallRecording, Grade, LogEntry, Member, MemberStatus, Payment, PaymentMethod, Role, SmsSend, Staff, WeeklyRecoIssue } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
 import { staffById, staffRoleById, assignableReps } from '@/lib/staff'
@@ -433,6 +433,8 @@ export interface MemberSettingsPatch {
   weekly_reco_count?: number | null // 조합발송갯수 (미설정 시 전역 기본)
   end_date?: string | null // 구독 종료일(수정용 override) — 미설정 시 결제 period_end (현장 6/26)
   reco_paused?: boolean // 조합발송 일시정지(true=발급·문자 중단). 일시정지 유료회원 문자 정지용(현장 6/26)
+  age_band?: string | null // 연령대(40미만/40~70/70이상) — 현장 피드백(7/3)
+  gender?: string | null // 성별(남/여) — 현장 피드백(7/3)
 }
 
 /** 회원별 발송 설정/홈페이지 비번 등(member.meta) 갱신. */
@@ -581,6 +583,85 @@ export function useDeleteMemo() {
   })
 }
 
+// ── 통화 녹음(현장 피드백 7/3, 김형준 이사) — meta.call_recordings 리스트 ──────────────
+/** member.meta.call_recordings 를 안전하게 읽는다(없으면 빈 배열). */
+export function readCallRecordings(m: Member | null | undefined): CallRecording[] {
+  if (!m) return []
+  const list = m.meta?.call_recordings as CallRecording[] | undefined
+  return Array.isArray(list) ? list : []
+}
+
+/** 녹음 파일 업로드(1단계: 상담원 수동 업로드 — PBX/통신사 자동연동은 정보 확보 후 별도). */
+export function useUploadCallRecording() {
+  const user = useCurrentUser()
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; file: File }) => {
+      if (dataSource === 'supabase') {
+        await supa.uploadCallRecording(v.id, v.file, user?.id ?? null)
+        return v.id
+      }
+      const entry: CallRecording = {
+        id: genId('rec'),
+        created_at: nowIso(),
+        uploaded_by: user?.id ?? null,
+        file_path: URL.createObjectURL(v.file), // mock: 세션 한정 blob URL(새로고침 시 소실)
+        file_name: v.file.name,
+      }
+      mutateDb((db) => {
+        const m = db.members.find((x) => x.id === v.id)
+        if (!m) return
+        m.meta = { ...m.meta, call_recordings: [entry, ...readCallRecordings(m)] }
+        db.logs.push(adminLog(user?.id ?? null, 'member.call_recording_upload', v.id, { file_name: v.file.name }))
+      })
+      return v.id
+    },
+    onSuccess: (id) => invalidate([id]),
+  })
+}
+
+/** 녹음 삭제(파일 + meta 항목). */
+export function useDeleteCallRecording() {
+  const user = useCurrentUser()
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; recId: string; filePath: string }) => {
+      if (dataSource === 'supabase') {
+        await supa.deleteCallRecording(v.id, v.recId, v.filePath, user?.id ?? null)
+        return v.id
+      }
+      mutateDb((db) => {
+        const m = db.members.find((x) => x.id === v.id)
+        if (!m) return
+        m.meta = { ...m.meta, call_recordings: readCallRecordings(m).filter((r) => r.id !== v.recId) }
+        db.logs.push(adminLog(user?.id ?? null, 'member.call_recording_delete', v.id, { rec_id: v.recId }))
+      })
+      return v.id
+    },
+    onSuccess: (id) => invalidate([id]),
+  })
+}
+
+/** 녹음 재생 URL — supabase 는 서명 URL(1시간) 발급, mock 은 blob URL 그대로 재사용. */
+export function useCallRecordingUrl() {
+  return useMutation({
+    mutationFn: async (filePath: string) =>
+      dataSource === 'supabase' ? supa.signCallRecordingUrl(filePath) : filePath,
+  })
+}
+
+/** STT 전사 + 키워드 탐지(/api/transcribe-call, OpenAI) — mock 모드는 미지원(실제 저장 파일이 없음). */
+export function useTranscribeCallRecording() {
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; recId: string; filePath: string }) => {
+      if (dataSource !== 'supabase') throw new Error('텍스트 변환은 라이브(Supabase) 모드에서만 지원됩니다.')
+      return supa.transcribeCallRecording(v.id, v.recId, v.filePath)
+    },
+    onSuccess: (_r, v) => invalidate([v.id]),
+  })
+}
+
 /** 상태/유입분류 등 일괄 패치. */
 export function useBulkUpdateMembers() {
   const user = useCurrentUser()
@@ -622,6 +703,8 @@ export interface MemberCreateInput {
   inflow_type?: string | null
   consult_status?: string | null
   tendency?: string | null
+  age_band?: string | null // 연령대(40미만/40~70/70이상) — 현장 피드백(7/3), meta 저장
+  gender?: string | null // 성별(남/여) — 현장 피드백(7/3), meta 저장
   memo?: string | null
   assigned_staff_id?: string | null
 }
@@ -655,7 +738,12 @@ function buildLeadMember(
     is_suspended: false,
     is_deleted: false,
     is_withdrawn: false,
-    meta: { ...(opts.dup ? { dup_phone: true } : {}), ...(opts.imported ? { imported: true } : {}) },
+    meta: {
+      ...(opts.dup ? { dup_phone: true } : {}),
+      ...(opts.imported ? { imported: true } : {}),
+      ...(input.age_band ? { age_band: input.age_band } : {}),
+      ...(input.gender ? { gender: input.gender } : {}),
+    },
   }
 }
 

@@ -21,19 +21,27 @@ export async function saveSiteSettings(next: SiteSettings, actor: string | null)
     terms: next.terms,
     terms_by_grade: next.terms_by_grade,
     membership_tiers: next.membership_tiers ?? [],
+    generation_records: next.generation_records ?? [],
+    call_keywords: next.call_keywords ?? ['보장'],
+    call_volume_alert_threshold: next.call_volume_alert_threshold ?? 1000,
   }
-  const { error } = await sb().from('site_settings').update(payload).eq('id', 1)
-  if (error) {
-    // membership_tiers 컬럼 마이그레이션(0008) 전이면 PGRST204 → 그 키만 빼고 재시도해
-    // 다른 설정 저장(무통장·약관 등)이 통째로 막히지 않게 한다(D68 방어구조 유지).
-    if (String(error.message).includes('membership_tiers')) {
-      const fallback = { ...payload }
-      delete (fallback as Record<string, unknown>).membership_tiers
-      const retry = await sb().from('site_settings').update(fallback).eq('id', 1)
-      if (retry.error) throw retry.error
-    } else {
-      throw error
-    }
+  // 신규 컬럼(membership_tiers 0008 · generation_records 0009 · call_keywords/call_volume_alert_threshold
+  // 0010) 마이그레이션 전이면 PGRST204 → 그 키만 빼고 재시도해 다른 설정 저장(무통장·약관 등)이
+  // 통째로 막히지 않게 한다(D68 방어구조).
+  const OPTIONAL_COLUMNS = [
+    'membership_tiers',
+    'generation_records',
+    'call_keywords',
+    'call_volume_alert_threshold',
+  ] as const
+  let attempt: Record<string, unknown> = payload
+  for (let i = 0; i <= OPTIONAL_COLUMNS.length; i++) {
+    const { error } = await sb().from('site_settings').update(attempt).eq('id', 1)
+    if (!error) break
+    const missing = OPTIONAL_COLUMNS.find((k) => k in attempt && String(error.message).includes(k))
+    if (!missing) throw error
+    attempt = { ...attempt }
+    delete attempt[missing]
   }
   await insertLog({
     kind: 'admin',

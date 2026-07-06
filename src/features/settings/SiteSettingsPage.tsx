@@ -65,6 +65,8 @@ const formSchema = z.object({
     ad_optout: z.string(),
   }),
   win_messages: z.array(z.object({ rank: z.number(), body: z.string().min(1, '문구를 입력하세요.') })),
+  call_keywords: z.string(), // 통화 녹음 자동탐지 특정 단어(쉼표 구분) — 현장 피드백 7/3
+  call_volume_alert_threshold: z.string(), // 월 통화량(상담상태 변경 건수) 경고 기준
 })
 type FormValues = z.infer<typeof formSchema>
 
@@ -89,6 +91,8 @@ function toForm(s: SiteSettings): FormValues {
       ad_optout: s.sms.ad_optout ?? '',
     },
     win_messages: s.win_messages.map((w) => ({ rank: w.rank, body: w.body })),
+    call_keywords: (s.call_keywords ?? ['보장']).join(', '),
+    call_volume_alert_threshold: String(s.call_volume_alert_threshold ?? 1000),
   }
 }
 
@@ -128,6 +132,12 @@ function toSettings(v: FormValues, prev: SiteSettings): SiteSettings {
     weekly_free_reco: prev.weekly_free_reco ?? { enabled: true, set_count: 30 },
     terms: prev.terms,
     terms_by_grade: prev.terms_by_grade,
+    // 다른 화면(멤버십 등급·추천번호 생성기록)에서 편집되는 필드 — 이 폼엔 없으니 그대로 보존.
+    // (이전엔 여기 빠져 있어 이 폼 저장 시 조용히 초기화되던 문제 발견·수정)
+    membership_tiers: prev.membership_tiers,
+    generation_records: prev.generation_records,
+    call_keywords: parseTids(v.call_keywords),
+    call_volume_alert_threshold: Math.max(1, Number(v.call_volume_alert_threshold) || 1000),
   }
 }
 
@@ -337,6 +347,35 @@ export function SiteSettingsPage() {
           <p className="text-[12.5px] leading-relaxed text-gray-500">
             회원별 발송요일은 <b>회원정보창</b>에서 지정하고, 매일 09:00 자동 발급/발송됩니다.
             유료회원 조합 문자 자동발송은 <b>설정 &gt; 로또 고정·제외 &gt; 추천조합 발급 설정</b>에서 켭니다.
+          </p>
+        </FieldRow>
+      </SectionCard>
+
+      {/* ── 통화 녹음 · 키워드 탐지 · 통화량 경고(현장 피드백 7/3, 김형준 이사) ── */}
+      <SectionCard
+        title="통화 녹음 · 키워드 탐지"
+        desc="회원 상세에서 업로드한 통화 녹음의 전사(STT) 결과에서 자동 탐지할 단어와, 월 발신 통화량(상담상태 변경 건수 기준) 경고 기준을 설정합니다."
+      >
+        <FieldRow label="탐지 단어" htmlFor="call_keywords">
+          <input
+            id="call_keywords"
+            className={inputCls}
+            placeholder="보장, 확정, 무조건"
+            {...register('call_keywords')}
+          />
+          <p className="mt-1 text-[11.5px] text-gray-400">
+            쉼표로 구분. 통화 녹음을 전사하면 이 단어가 몇 번 나왔는지 회원 상세 ‘통화녹음’ 탭에 표시됩니다.
+          </p>
+        </FieldRow>
+        <FieldRow label="통화량 경고 기준" htmlFor="call_volume_alert_threshold">
+          <input
+            id="call_volume_alert_threshold"
+            inputMode="numeric"
+            className={cn(inputCls, 'max-w-[140px] font-mono tnum')}
+            {...register('call_volume_alert_threshold')}
+          />
+          <p className="mt-1 text-[11.5px] text-gray-400">
+            이번 달 상담상태 변경 건수(=발신 통화 근사치)가 이 값을 넘으면 관리자 화면에 경고가 표시됩니다.
           </p>
         </FieldRow>
       </SectionCard>
