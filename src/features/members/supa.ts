@@ -461,6 +461,14 @@ export async function requestPayment(
   await pushLog({ kind: 'admin', actor, action: 'payment.request', target_type: 'member', target_id: v.memberId, meta: { product_id: v.productId, amount: v.amount, method: v.method } })
 }
 
+/** 결제건별 담당자 배정 변경(현장 피드백 7/6) — 1차/2차/3차결제마다 다른 담당자를 붙일 수 있게.
+ *  매출 귀속은 이미 payment.staff_id 기준(REVENUE_RULES.attribution='payment_staff')이라 이 값만 바꾸면 된다. */
+export async function updatePaymentStaff(paymentId: string, staffId: string | null, actor: string | null): Promise<void> {
+  const { error } = await sb().from('payments').update({ staff_id: staffId }).eq('id', paymentId)
+  if (error) throw error
+  await pushLog({ kind: 'admin', actor, action: 'payment.staff_update', target_type: 'payment', target_id: paymentId, meta: { staff_id: staffId } })
+}
+
 /** 콜메모 소프트삭제(<회원정보창> 7) — deleted_at 마킹, member.memo=미삭제 최신으로 동기화. */
 export async function deleteMemo(id: string, memoId: string, actor: string | null): Promise<void> {
   const { data: cur } = await sb().from('members').select('meta').eq('id', id).maybeSingle()

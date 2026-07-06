@@ -45,6 +45,7 @@ import {
   useTranscribeCallRecording,
   useUpdateMember,
   useUpdateMemberSettings,
+  useUpdatePaymentStaff,
   useUploadCallRecording,
   type ResetMemo,
 } from './api'
@@ -97,6 +98,7 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
   const sendCustomSms = useSendCustomSms()
   const manualIssue = useManualIssueReco()
   const requestPayment = useRequestPayment()
+  const updatePaymentStaff = useUpdatePaymentStaff()
   const updateSettings = useUpdateMemberSettings()
   const uploadCallRec = useUploadCallRecording()
   const deleteCallRec = useDeleteCallRecording()
@@ -157,6 +159,16 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
     for (const s of staff) m[s.id] = s.name
     return m
   }, [staff])
+
+  // 결제 회차(1차/2차/3차…) — 현장 피드백 7/6: 결제건마다 다른 담당자를 배정할 수 있어야 하므로
+  // 시간순(오름차순)으로 몇 번째 결제인지 매겨서 표시. payments 는 최신순 정렬이라 여기서 뒤집어 계산.
+  const paymentRound = useMemo(() => {
+    const m: Record<string, number> = {}
+    ;[...payments]
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .forEach((p, i) => (m[p.id] = i + 1))
+    return m
+  }, [payments])
 
   // 종료일 기본값 = 결제일(없으면 가입일) + 1년. meta.end_date(수정 override) 우선 (현장 6/26·6/29).
   const defaultEnd = useMemo(() => {
@@ -590,22 +602,54 @@ export function MemberDrawer({ memberId, onClose }: { memberId: string | null; o
             rows={payments}
             empty="결제 내역이 없습니다."
             render={(p) => (
-            <div key={p.id} className="flex items-center justify-between border-b border-gray-100 py-2.5">
-              <div className="flex items-center gap-2">
-                <StatusChip status={p.status} />
-                <span className="text-[12.5px] font-semibold text-ink-800">
-                  {p.product_id ? productName[p.product_id] ?? p.product_id : '-'}
-                </span>
-                <span className="text-[11.5px] text-gray-400">
-                  {PAYMENT_METHOD_LABEL[p.method]}
-                  {p.pg_provider ? ` · ${p.pg_provider}` : ''}
-                </span>
-              </div>
-              <div className="text-right">
-                <div className="font-mono text-[12.5px] font-bold tnum text-ink-800">{krw(p.amount)}</div>
-                <div className="font-mono text-[10.5px] tnum text-gray-400">
-                  {p.paid_at ? date(p.paid_at) : date(p.created_at)}
+            <div key={p.id} className="border-b border-gray-100 py-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10.5px] font-bold text-gray-500">
+                    {paymentRound[p.id] ?? '?'}차결제
+                  </span>
+                  <StatusChip status={p.status} />
+                  <span className="text-[12.5px] font-semibold text-ink-800">
+                    {p.product_id ? productName[p.product_id] ?? p.product_id : '-'}
+                  </span>
+                  <span className="text-[11.5px] text-gray-400">
+                    {PAYMENT_METHOD_LABEL[p.method]}
+                    {p.pg_provider ? ` · ${p.pg_provider}` : ''}
+                  </span>
                 </div>
+                <div className="text-right">
+                  <div className="font-mono text-[12.5px] font-bold tnum text-ink-800">{krw(p.amount)}</div>
+                  <div className="font-mono text-[10.5px] tnum text-gray-400">
+                    {p.paid_at ? date(p.paid_at) : date(p.created_at)}
+                  </div>
+                </div>
+              </div>
+              {/* 결제건별 담당자 배정(현장 피드백 7/6) — 회차마다 다른 담당자 지정 가능, 매출귀속에 즉시 반영 */}
+              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-500">
+                <span className="font-semibold">담당</span>
+                {role === 'admin' ? (
+                  <select
+                    className={selectCls + ' h-6 text-[11px]'}
+                    value={p.staff_id ?? ''}
+                    disabled={updatePaymentStaff.isPending}
+                    onChange={(e) =>
+                      updatePaymentStaff.mutate({
+                        paymentId: p.id,
+                        memberId: id,
+                        staffId: e.target.value || null,
+                      })
+                    }
+                  >
+                    <option value="">미지정</option>
+                    {staff.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-gray-700">{p.staff_id ? staffName[p.staff_id] ?? '-' : '미지정'}</span>
+                )}
               </div>
             </div>
             )}

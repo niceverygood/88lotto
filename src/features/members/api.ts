@@ -603,6 +603,33 @@ export function useRequestPayment() {
   })
 }
 
+/** 결제건별 담당자 배정 변경(현장 피드백 7/6) — 1차/2차/3차결제마다 다른 담당자 지정 가능.
+ *  매출 귀속은 이미 payment.staff_id 기준(REVENUE_RULES.attribution='payment_staff')이라 이 값만 바꾸면 매출 화면에도 바로 반영됨. */
+export function useUpdatePaymentStaff() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: { paymentId: string; memberId: string; staffId: string | null }) => {
+      if (dataSource === 'supabase') {
+        await supa.updatePaymentStaff(v.paymentId, v.staffId, user?.id ?? null)
+        return v
+      }
+      mutateDb((db) => {
+        const p = db.payments.find((x) => x.id === v.paymentId)
+        if (!p) return
+        p.staff_id = v.staffId
+        db.logs.push(adminLog(user?.id ?? null, 'payment.staff_update', v.paymentId, { staff_id: v.staffId }))
+      })
+      return v
+    },
+    onSuccess: (v) => {
+      qc.invalidateQueries({ queryKey: paymentKeys.all })
+      qc.invalidateQueries({ queryKey: revenueKeys.all })
+      qc.invalidateQueries({ queryKey: memberKeys.payments(v.memberId) })
+    },
+  })
+}
+
 /**
  * 콜메모 소프트삭제(<회원정보창> 7) — 최고관리자 전용(UI 가드). deleted_at 마킹만 하고 보존,
  * member.memo(최신 1건)는 남은(미삭제) 최신 메모로 동기화한다.
