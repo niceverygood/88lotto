@@ -542,4 +542,10 @@
 - **설계**: 앱이 직접 녹음하지 않고(Android가 통화 녹음 API를 막아놔 비현실적), 폰 기본 통화녹음 폴더의 기존 파일을 감지해 업로드만 한다(사용자 확인). 배포는 Play스토어 없이 APK 사이드로딩(사용자 확인).
 - **신규 백엔드**: `api/ingest-call-recording.ts`(멀티파트, `busboy` 신규 의존성) — Bearer 토큰(스태프 계정) 인증 후 전화번호를 `members.phone`과 매칭(숫자만 추출 + 국가코드 보정 + 하이픈 포함/미포함 후보로 `.in()` 조회). 1건 매치 시 그 회원 `meta.call_recordings[]`에 `source:'auto'`로 append, 0/2건 이상이면 `unmatched_call_recordings`(0011 마이그레이션) 테이블에 보관.
 - **어드민 신규 화면**: `/admins/recordings`(미매칭 통화녹음) — 이름·전화·로그인ID로 회원 검색 후 수동 연결. `AdminsPage`에 진입 버튼 추가(라우팅은 `/admins/roles`와 동일하게 `navKey="admins"` 게이트, 사이드바 메뉴 항목은 추가하지 않음 — 기존 권한관리 페이지와 동일한 "관리자 하위 버튼" 관례를 따름).
-- **Android 앱**(`android-call-uploader/`, 별도 Gradle 프로젝트): 상세 설계·검증 결과는 세션 로그 참조. 실기기 폴더경로·파일명 규칙은 삼성/샤오미/LG 각 1대 이상 실사용 검증이 남은 후속 과제.
+- **Android 앱**(`android-call-uploader/`, 별도 Gradle 프로젝트, 패키지 `kr.bottlecorp.pluslotto.recuploader`): Kotlin+Compose, minSdk26/target35. 로그인(Supabase Auth 직접) → 15분 주기 WorkManager 스캔(+MediaStore 보조) → Room 중복방지 → `/api/ingest-call-recording` 업로드. 이 Mac에 이미 설치돼 있던 Android SDK/AVD 로 이 세션에서 직접 빌드·에뮬레이터 설치·검증함:
+  - 단위테스트(`RecordingFileMatcherTest`) 11/11 통과 — OEM별 파일명 정규식(삼성/샤오미/LG)·타임스탬프 파싱.
+  - 실제 라이브 Supabase Auth(`/auth/v1/token`)로 로그인 네트워크 왕복 확인(틀린 계정으로 400 응답 → 에러 UI 정상 표시).
+  - 포그라운드 서비스(Android14 `dataSync` 타입)+알림+WorkManager 15분 주기 작업 등록 확인.
+  - 더미 녹음파일 배치 → 스캔이 감지·전화번호 파싱·Room에 적재·업로드 워커 큐잉까지 확인(실토큰 없어 최종 업로드 자체는 재시도 상태로 정지 — 정상 동작).
+  - 검증 후 테스트용 임시 설정(서비스 exported=true, 로그인 게이트 우회)은 전부 원복하고 최종 빌드 재확인함.
+  - **확인필요(후속)**: 실기기 폴더 경로·파일명 규칙은 삼성/샤오미/LG 각 1대 이상 실사용 검증 필요 — 앱 안 진단화면 로그로 운영 중 튜닝.
