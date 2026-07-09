@@ -55,6 +55,7 @@ const NAV: NavGroup[] = [
       { key: 'admins', label: '관리자', to: '/admins' },
       { key: 'logs', label: '로그', to: '/logs/admin', adminOnly: true },
       { key: 'stats', label: '통계', to: '/stats' },
+      { key: 'payroll', label: '급여', to: '/payroll' },
       { key: 'settings', label: '설정', to: '/settings' },
     ],
   },

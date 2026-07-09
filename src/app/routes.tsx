@@ -20,6 +20,7 @@ import { RolesPage } from '@/features/admins/RolesPage'
 import { UnmatchedRecordingsPage } from '@/features/admins/UnmatchedRecordingsPage'
 import { LogsPage } from '@/features/logs/LogsPage'
 import { StatsPage } from '@/features/stats/StatsPage'
+import { PayrollPage } from '@/features/payroll/PayrollPage'
 import { SettingsLayout } from '@/features/settings/SettingsLayout'
 import { SiteSettingsPage } from '@/features/settings/SiteSettingsPage'
 import { MembershipSettingsPage } from '@/features/settings/MembershipSettingsPage'
@@ -107,6 +108,7 @@ export function AppRoutes() {
         <Route path="/logs" element={<Navigate to="/logs/admin" replace />} />
         <Route path="/logs/:kind" element={<RequireNav navKey="logs"><LogsPage /></RequireNav>} />
         <Route path="/stats" element={<RequireNav navKey="stats"><StatsPage /></RequireNav>} />
+        <Route path="/payroll" element={<RequireNav navKey="payroll"><PayrollPage /></RequireNav>} />
         <Route path="/settings" element={<RequireNav navKey="settings"><SettingsLayout /></RequireNav>}>
           <Route index element={<SiteSettingsPage />} />
           <Route path="membership" element={<MembershipSettingsPage />} />

@@ -63,3 +63,10 @@ export const settingsKeys = {
 export const smsTemplateKeys = {
   all: ['sms_templates'] as const,
 }
+
+// 급여(커미션)·상담원 매칭분석 — payments(결제건별 담당자·차수) 파생 집계(현장 7/9).
+export const payrollKeys = {
+  all: ['payroll'] as const,
+  month: (m: string) => ['payroll', 'month', m] as const,
+  matching: (p: Record<string, unknown>) => ['payroll', 'matching', p] as const,
+}

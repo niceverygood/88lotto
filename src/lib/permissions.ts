@@ -21,6 +21,7 @@ export const MODULE_LABEL: Record<NavKey, string> = {
   logs: '로그',
   stats: '통계',
   settings: '설정',
+  payroll: '급여',
 }
 
 export const ROLE_ORDER: Role[] = ['admin', 'manager', 'leader', 'rep']
@@ -57,6 +58,8 @@ export const DEFAULT_NAV_ACCESS: Record<NavKey, Role[]> = {
   logs: ['admin'],
   stats: ['admin', 'manager', 'leader'],
   settings: ['admin', 'manager'],
+  // 급여(커미션 금액)는 민감정보라 최고관리자·관리자만 노출(현장 7/9).
+  payroll: ['admin', 'manager'],
 }
 
 /** 주어진 매트릭스(없으면 기본값)로 접근 판정. admin 의 잠금 모듈은 항상 허용. */

@@ -12,6 +12,7 @@ import {
   ScrollText,
   BarChart3,
   Settings,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -32,4 +33,5 @@ export const navIcons = {
   logs: ScrollText,
   stats: BarChart3,
   settings: Settings,
+  payroll: Wallet,
 } satisfies Record<string, LucideIcon>
