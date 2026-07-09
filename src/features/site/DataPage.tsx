@@ -11,6 +11,7 @@
 //   TS strict / any 금지 / Tailwind·브랜드 토큰만 / UI 한국어 / 모바일 반응형.
 // ─────────────────────────────────────────────────────────────────────────
 import { useMemo, type ReactNode } from 'react'
+import { BRAND } from '@/lib/brand'
 import { BarChart3, CalendarDays, Hash, Trophy } from 'lucide-react'
 import { EmptyState, LottoBalls, SkeletonRows } from '@/design-system/components'
 import { krw, date } from '@/lib/format'
@@ -93,7 +94,7 @@ export function DataPage() {
       {/* ── 페이지 헤더 ──────────────────────────────────────── */}
       <header className="mb-7">
         <p className="mb-1 text-[12.5px] font-bold uppercase tracking-wide text-primary-600">
-          88로또자료
+          {BRAND.name}자료
         </p>
         <h1 className="text-[26px] font-extrabold tracking-tight text-ink-900 sm:text-[30px]">
           회차별 당첨번호

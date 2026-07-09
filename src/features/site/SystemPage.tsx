@@ -15,6 +15,7 @@
 // 브랜드 토큰만 사용(임의 hex/px 금지). UI 한국어, 모바일 반응형.
 // ─────────────────────────────────────────────────────────────────────────
 import { Link } from 'react-router-dom'
+import { BRAND } from '@/lib/brand'
 import {
   AlertTriangle,
   ArrowRight,
@@ -104,14 +105,14 @@ export function SystemPage() {
           <div className="max-w-2xl">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[12.5px] font-semibold text-accent-100">
               <Sparkles className="h-3.5 w-3.5" />
-              88시스템
+              {BRAND.short}시스템
             </span>
             <h1 className="mt-4 text-[28px] font-extrabold leading-tight tracking-tight sm:text-[36px]">
               번호는 <span className="text-accent-500">선별</span>하고,
               <br className="hidden sm:block" /> 발급은 <span className="text-accent-500">자동</span>으로.
             </h1>
             <p className="mt-4 text-[15px] leading-relaxed text-gray-300 sm:text-[16px]">
-              88로또는 매주 회차마다 데이터 기반으로 추천 조합을 선별해 자동 발급하고,
+              {BRAND.name}는 매주 회차마다 데이터 기반으로 추천 조합을 선별해 자동 발급하고,
               문자로 안내한 뒤 추첨 결과까지 집계해 드리는 로또 번호 추천 서비스입니다.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-3">
@@ -275,7 +276,7 @@ export function SystemPage() {
                 <b className="text-ink-900">
                   어떤 조합이든 1등에 당첨될 확률은 약 814만 5,060분의 1로 모두 동일
                 </b>
-                합니다. 88시스템의 번호 추천은 데이터를 바탕으로 조합을{' '}
+                합니다. {BRAND.short}시스템의 번호 추천은 데이터를 바탕으로 조합을{' '}
                 <b className="text-ink-900">선별</b>해 드리는 것일 뿐,{' '}
                 <b className="text-ink-900">당첨 확률을 높여 주지 않으며 당첨을 보장하지 않습니다.</b>
               </p>

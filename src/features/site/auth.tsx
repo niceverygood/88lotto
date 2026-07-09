@@ -34,6 +34,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { BRAND } from '@/lib/brand'
 import { homepagePw } from '@/lib/homepage'
 import { dataSource, supabase } from '@/lib/supabase'
 import { readDb } from '@/lib/db/store'
@@ -148,7 +149,7 @@ async function doSignup(input: SignupInput): Promise<AuthResult> {
     `이름: ${name}`,
     `연락처: ${d}`,
     input.memo?.trim() ? `메모: ${input.memo.trim()}` : null,
-    '경로: 88로또 홈페이지 가입문의',
+    `경로: ${BRAND.name} 홈페이지 가입문의`,
   ]
     .filter(Boolean)
     .join('\n')

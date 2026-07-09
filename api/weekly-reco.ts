@@ -493,10 +493,13 @@ export const MODE_OPTIONS: ExclusionMode[] = [10, 15, 20]
 // 유료 등급(골드/골드+/VIP/로얄)만 대상. 무료는 발급만(문자 X).
 const PAID_GRADES = new Set(['gold', 'goldp', 'vip', 'royal'])
 
+// 멀티테넌트 브랜드(배포별 VITE_BRAND). 서버함수라 process.env 사용(클라 lib/brand 와 동일 값).
+const BRAND_NAME = process.env.VITE_BRAND || '88로또'
+
 /** 조합 목록 → SMS 본문(LMS). */
 function formatComboSms(name: string, round: number, sets: number[][]): string {
   const lines = sets.map((s, i) => `${String(i + 1).padStart(2, '0')}. ${s.join(', ')}`)
-  return `[88로또] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
+  return `[${BRAND_NAME}] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}\n\n홈페이지에서도 확인 가능합니다.`
 }
 
 /** 한국 문자 바이트 길이(비ASCII=2byte). SMS=90byte 기준. (src/lib/oneshot.ts koByteLength 동기화) */

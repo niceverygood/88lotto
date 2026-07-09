@@ -9,6 +9,7 @@
 // ※ 이 파일은 <SiteLayout/> 의 <Outlet/> 안에 렌더되므로 "본문 콘텐츠"만 반환한다.
 // ─────────────────────────────────────────────────────────────────────────
 import { useMemo } from 'react'
+import { BRAND } from '@/lib/brand'
 import { Link } from 'react-router-dom'
 import { Check, Crown, FileText, Headphones, Minus, Sparkles } from 'lucide-react'
 import type { Grade, MembershipTier } from '@/types/db'
@@ -154,7 +155,7 @@ export function MembershipPage() {
         <div className="mx-auto max-w-[1120px] px-4 py-14 sm:px-6 sm:py-16">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[12px] font-semibold text-accent-500">
             <Crown className="h-3.5 w-3.5" />
-            88멤버십
+            {BRAND.short}멤버십
           </span>
           <h1 className="mt-4 text-[28px] font-extrabold leading-tight text-white sm:text-[34px]">
             등급별 맞춤 번호 서비스로

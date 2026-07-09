@@ -10,6 +10,7 @@
 //   - useRecentRounds(1): 최근 회차 1건 미리보기. 로딩/빈/에러는 모두 graceful 처리.
 // ─────────────────────────────────────────────────────────────────────────
 import type { ReactNode } from 'react'
+import { BRAND } from '@/lib/brand'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -119,7 +120,7 @@ export function HomePage() {
             <h1 className="text-[32px] font-extrabold leading-[1.15] tracking-tight text-white sm:text-[48px]">
               인생역전의 기회,
               <br />
-              <span className="text-accent-500">88</span>로또와 함께
+              <span className="text-accent-500">{BRAND.short}</span>{BRAND.rest}와 함께
             </h1>
 
             <p className="mx-auto mt-5 max-w-xl text-[15px] leading-relaxed text-gray-300 sm:text-[17px]">
@@ -157,14 +158,14 @@ export function HomePage() {
       {/* ── 3대 강점 ───────────────────────────────────────────── */}
       <section className="mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-20">
         <SectionHeading
-          eyebrow="WHY 88로또"
+          eyebrow={`WHY ${BRAND.name}`}
           title={
             <>
               번호 추천부터 당첨 안내까지,
               <br className="hidden sm:block" /> 한 번에
             </>
           }
-          desc="복잡한 과정 없이, 88로또가 알아서 챙겨드립니다."
+          desc={`복잡한 과정 없이, ${BRAND.name}가 알아서 챙겨드립니다.`}
         />
 
         <div className="grid gap-5 sm:grid-cols-3">
@@ -218,7 +219,7 @@ export function HomePage() {
                     </div>
                   )}
                   <p className="mt-6 text-[13.5px] leading-relaxed text-gray-500">
-                    88로또는 매주 추첨 결과를 자동 집계해 회원님의 발급 번호 당첨 여부를 안내합니다.
+                    {BRAND.name}는 매주 추첨 결과를 자동 집계해 회원님의 발급 번호 당첨 여부를 안내합니다.
                   </p>
                 </>
               ) : null}
@@ -327,7 +328,7 @@ export function HomePage() {
           />
           <div className="relative">
             <h2 className="text-[24px] font-extrabold leading-tight text-white sm:text-[30px]">
-              지금 바로 88로또를 시작하세요
+              지금 바로 {BRAND.name}를 시작하세요
             </h2>
             <p className="mx-auto mt-3 max-w-md text-[14px] leading-relaxed text-primary-100 sm:text-[15px]">
               가입은 무료, 추천번호는 매주 자동으로. 당첨의 기회를 놓치지 마세요.

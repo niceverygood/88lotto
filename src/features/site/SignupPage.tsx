@@ -15,6 +15,7 @@
 // 라우트 등록(/portal/signup)은 Phase3 가 담당.
 // ─────────────────────────────────────────────────────────────────────────
 import { useMemo, useState, type FormEvent } from 'react'
+import { BRAND } from '@/lib/brand'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, Loader2, Phone, ShieldCheck, User } from 'lucide-react'
 import { useMemberAuth } from './auth'
@@ -92,10 +93,10 @@ export function SignupPage() {
         <section className="order-2 lg:order-1">
           <div className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1 text-[12.5px] font-bold text-primary-700">
             <ShieldCheck className="h-3.5 w-3.5" />
-            88로또 회원 신청
+            {BRAND.name} 회원 신청
           </div>
           <h1 className="mt-4 text-[26px] font-extrabold leading-tight text-ink-900 sm:text-[30px]">
-            88<span className="text-accent-500">로또</span> 회원이 되어
+            {BRAND.short}<span className="text-accent-500">{BRAND.rest}</span> 회원이 되어
             <br />내 추천번호를 받아보세요
           </h1>
           <p className="mt-3 max-w-md text-[14px] leading-relaxed text-gray-500">

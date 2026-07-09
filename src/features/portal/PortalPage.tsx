@@ -3,6 +3,7 @@
 // 운영콘솔 staff 인증과 무관. 라이브=portal_member_recos RPC(security definer), mock=로컬 DB 검증.
 // 풀 홈페이지(분석/멤버십/고객센터, ilhanglotto.co.kr 참고)는 별도 단계 — ASSUMPTIONS 참조.
 import { useState, type FormEvent } from 'react'
+import { BRAND } from '@/lib/brand'
 import { Loader2, LogIn, LogOut, Phone } from 'lucide-react'
 import { Badge, LottoBalls } from '@/design-system/components'
 import { datetime } from '@/lib/format'
@@ -72,7 +73,7 @@ export function PortalPage() {
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex h-14 max-w-[560px] items-center gap-2 px-4">
           <span className="h-2.5 w-2.5 rounded-sm bg-[color:var(--accent-500)]" />
-          <span className="text-[17px] font-extrabold text-ink-900">88로또</span>
+          <span className="text-[17px] font-extrabold text-ink-900">{BRAND.name}</span>
           <span className="text-[12px] text-gray-400">내 추천번호 확인</span>
           {session && (
             <button

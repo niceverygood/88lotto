@@ -7,6 +7,7 @@ import { useCurrentUser, useSignOut } from '@/lib/auth'
 import { useNavAccess } from '@/lib/navAccess'
 import { useNavBadges } from '@/lib/navBadges'
 import { canAccessWith, ROLE_LABEL, type NavKey } from '@/lib/permissions'
+import { BRAND } from '@/lib/brand'
 import { cn } from '@/lib/cn'
 
 interface NavItem {
@@ -103,7 +104,7 @@ export function AppShell() {
           )}
         >
           <span className="h-2 w-2 shrink-0 rounded-sm bg-[color:var(--accent-500)]" />
-          {!collapsed && <span className="text-[15px]">88로또</span>}
+          {!collapsed && <span className="text-[15px]">{BRAND.name}</span>}
         </div>
 
         <nav className="flex-1">

@@ -3,6 +3,7 @@
 // 카드/전체보기는 해당 필터가 적용된 화면으로 딥링크하되, 역할이 접근 불가한 대상이면(매트릭스
 // nav_access) 비활성으로 둔다 — 라우트 가드(RequireNav)로 튕기지 않도록. 수치는 보는 사람 스코프.
 import { useNavigate } from 'react-router-dom'
+import { BRAND } from '@/lib/brand'
 import type { ReactNode } from 'react'
 import {
   ChevronRight,
@@ -42,7 +43,7 @@ interface KpiConfig {
 }
 
 export function DashboardPage() {
-  usePageMeta('대시보드', '88로또 운영 콘솔')
+  usePageMeta('대시보드', `${BRAND.name} 운영 콘솔`)
   const navigate = useNavigate()
   const role = useRole()
   const { data: navMap } = useNavAccess()
