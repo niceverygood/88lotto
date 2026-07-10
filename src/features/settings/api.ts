@@ -3,12 +3,12 @@
 // gradeTheme(useGradeColorSync)가 재적용 → 전 화면 <Badge grade> 토큰이 즉시 바뀐다(§3 검수).
 // sms_templates 는 members(드로어·일괄·나의문자)와 공유 키 → 저장 시 그쪽도 함께 갱신(§8).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { LogEntry, SiteSettings, SmsTemplate } from '@/types/db'
+import type { LogEntry, LottoRound, SiteSettings, SmsTemplate } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
-import { fetchSiteSettings, fetchTables } from '@/lib/db/remote'
+import { fetchSiteSettings, fetchTables, selectAll } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
-import { settingsKeys, smsTemplateKeys } from '@/lib/queryKeys'
+import { lottoKeys, settingsKeys, smsTemplateKeys } from '@/lib/queryKeys'
 import * as supa from './supa'
 
 function adminLog(
@@ -61,6 +61,16 @@ export function useSaveSiteSettings() {
       })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.all }),
+  })
+}
+
+/** 전 회차(고정수 추천 점수 계산용, lib/lottoFixedScore) — lottoKeys 공유로 lotto 모듈과 캐시 동일. */
+export function useAllLottoRounds() {
+  return useQuery({
+    queryKey: lottoKeys.rounds({ scope: 'all' }),
+    queryFn: async (): Promise<LottoRound[]> =>
+      dataSource === 'supabase' ? await selectAll<LottoRound>('lotto_rounds') : readDb().lotto_rounds,
+    staleTime: 10 * 60 * 1000,
   })
 }
 

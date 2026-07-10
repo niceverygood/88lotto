@@ -10,8 +10,9 @@ import { useCurrentUser } from '@/lib/auth'
 import { cn } from '@/lib/cn'
 import { GRADE_LABEL } from '@/design-system/labels'
 import { LOTTO_RULE_GRADES } from '@/lib/lotto'
+import { computeFixedScores } from '@/lib/lottoFixedScore'
 import { SectionCard } from './ui'
-import { useSaveSiteSettings, useSiteSettings } from './api'
+import { useAllLottoRounds, useSaveSiteSettings, useSiteSettings } from './api'
 
 type Mode = 'fixed' | 'excluded'
 const NUMBERS = Array.from({ length: 45 }, (_, i) => i + 1)
@@ -40,6 +41,7 @@ export function LottoExcludePage() {
   const me = useCurrentUser()
   const { data: settings } = useSiteSettings()
   const save = useSaveSiteSettings()
+  const { data: allRounds = [] } = useAllLottoRounds()
 
   const [fixed, setFixed] = useState<number[]>([])
   const [excluded, setExcluded] = useState<number[]>([])
@@ -49,6 +51,12 @@ export function LottoExcludePage() {
   const [effectiveFrom, setEffectiveFrom] = useState(nextMonday())
   const [editingId, setEditingId] = useState<string | null>(null) // 이력 수정 중인 규칙 id(현장 피드백 6/22)
   const [deleteId, setDeleteId] = useState<string | null>(null) // 삭제 확인 대상
+
+  // 고정수 추천 점수(현장 피드백 7/9, "고정수 로직.docx" — 3차 상품/로얄 대상) — 참고용 랭킹만 제공,
+  // 자동 적용은 하지 않고 담당자가 위 번호판에서 직접 확정한다.
+  const [topN, setTopN] = useState('6')
+  const [showScoreDetail, setShowScoreDetail] = useState(false)
+  const scoreRows = useMemo(() => computeFixedScores(allRounds), [allRounds])
 
   // 무료회원 주간 발급 설정(현장 피드백)
   const [recoEnabled, setRecoEnabled] = useState(true)
@@ -196,8 +204,105 @@ export function LottoExcludePage() {
 
   if (!settings) return <div className="py-16 text-center text-[13px] text-gray-400">불러오는 중…</div>
 
+  function fillTopScored() {
+    const n = Math.max(1, Math.min(39, Number(topN) || 6))
+    const top = scoreRows.slice(0, n).map((r) => r.number)
+    setMode('fixed')
+    setFixed(top)
+    setExcluded((e) => e.filter((x) => !top.includes(x)))
+  }
+
   return (
     <div className="space-y-4">
+      <SectionCard
+        title="고정수 추천 점수 (고정수 로직 — 3차 상품/로얄 참고자료)"
+        desc="전달주신 「고정수 로직」 문서의 5개 가중 항목(최근20회·최근100회·미출현간격·전체출현·동반출현, 합 100점)으로 1~45번 전체를 채점한 참고 순위입니다. 자동으로 등급에 적용되지 않고, 아래 번호판에서 담당자가 직접 확정합니다."
+      >
+        <div className="mb-3 flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="mb-1 block text-[11.5px] font-semibold text-gray-500">상위 몇 개</span>
+            <input
+              type="number"
+              min={1}
+              max={39}
+              value={topN}
+              onChange={(e) => setTopN(e.target.value.replace(/\D/g, ''))}
+              className={cn(fieldCls, 'w-[90px]')}
+            />
+          </label>
+          <Button variant="pri" size="sm" onClick={fillTopScored} disabled={scoreRows.length === 0}>
+            아래 번호판 고정수 칸에 채우기
+          </Button>
+          <button
+            type="button"
+            className="pb-2 text-[11.5px] font-semibold text-primary-600 hover:underline"
+            onClick={() => setShowScoreDetail((v) => !v)}
+          >
+            {showScoreDetail ? '점수 구성 접기' : '점수 구성 자세히 보기'}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {scoreRows.slice(0, Math.max(1, Math.min(39, Number(topN) || 6))).map((r, i) => (
+            <span
+              key={r.number}
+              className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2.5 py-1 text-[12px] font-semibold text-primary-700"
+            >
+              <span className="text-primary-400">{i + 1}</span>
+              {r.number}번 <span className="font-mono tnum text-primary-500">{r.score}점</span>
+            </span>
+          ))}
+          {scoreRows.length === 0 && (
+            <p className="text-[12.5px] text-gray-400">회차 데이터가 없어 계산할 수 없습니다.</p>
+          )}
+        </div>
+
+        {showScoreDetail && (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-left text-[12px]">
+              <thead className="border-b border-gray-100 bg-gray-50 text-[10.5px] font-bold uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="px-2 py-1.5">순위</th>
+                  <th className="px-2 py-1.5">번호</th>
+                  <th className="px-2 py-1.5 text-right">최근20회(30)</th>
+                  <th className="px-2 py-1.5 text-right">최근100회(25)</th>
+                  <th className="px-2 py-1.5 text-right">미출현간격(20)</th>
+                  <th className="px-2 py-1.5 text-right">전체출현(15)</th>
+                  <th className="px-2 py-1.5 text-right">동반출현(10)</th>
+                  <th className="px-2 py-1.5 text-right font-extrabold">합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scoreRows.slice(0, 15).map((r, i) => (
+                  <tr key={r.number} className="border-t border-gray-50">
+                    <td className="px-2 py-1 font-mono tnum text-gray-400">{i + 1}</td>
+                    <td className="px-2 py-1 font-mono tnum font-semibold text-ink-800">{r.number}</td>
+                    <td className="px-2 py-1 text-right font-mono tnum text-gray-600">
+                      {r.s20}({r.appear20}회)
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tnum text-gray-600">
+                      {r.s100}({r.appear100}회)
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tnum text-gray-600">
+                      {r.sGap}({r.gapRounds}회차)
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tnum text-gray-600">
+                      {r.sTotal}({r.appearAll}회)
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tnum text-gray-600">{r.sPartner}</td>
+                    <td className="px-2 py-1 text-right font-mono tnum font-bold text-primary-700">{r.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[11px] text-gray-400">
+              * 전체출현 21~45위 구간 경계, 동반출현 등급 경계는 문서에 명시가 없어 합리적으로
+              해석했습니다(각 45개 번호 기준 분할/4분위). 실제 기준과 다르면 말씀해 주세요.
+            </p>
+          </div>
+        )}
+      </SectionCard>
+
       <SectionCard
         title="고정·제외 입력 (회차 예약)"
         desc="대상 등급·고정수/제외수를 선택하고 적용 회차·시작일을 지정해 이력에 추가합니다. 등급별로 따로 지정할 수 있고, 해당 등급 규칙이 없으면 ‘공통(전체)’ 규칙이 적용됩니다. 토요일에 입력하면 익주 월요일부터 적용됩니다."

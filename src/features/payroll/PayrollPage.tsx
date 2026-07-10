@@ -142,11 +142,11 @@ function MatchingTab() {
           <table className="w-full min-w-[640px] border-collapse text-left">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-4 py-2.5 text-[12px] font-bold text-gray-600">순위</th>
+                <th className="px-4 py-2.5 text-[12px] font-bold text-gray-600">궁합 랭킹</th>
                 <th className="px-3 py-2.5 text-[12px] font-bold text-gray-600">1차 담당자</th>
                 <th className="px-3 py-2.5 text-[12px] font-bold text-gray-600">2차 담당자</th>
                 <th className="px-3 py-2.5 text-right text-[12px] font-bold text-gray-600">1차 판매</th>
-                <th className="px-3 py-2.5 text-right text-[12px] font-bold text-gray-600">2차 성공</th>
+                <th className="px-3 py-2.5 text-right text-[12px] font-bold text-gray-600">2차 업셀 성공</th>
                 <th className="px-4 py-2.5 text-right text-[12px] font-bold text-gray-600">성공률</th>
               </tr>
             </thead>
@@ -182,9 +182,8 @@ function MatchingTab() {
       )}
 
       <p className="mt-3 text-[11.5px] leading-relaxed text-gray-400">
-        * 성공률 = (해당 1차→2차 조합의 2차 성공 건수) ÷ (그 1차 담당자의 전체 1차 판매 건수). 1차
-        판매 건수가 적은 조합은 성공률 변동폭이 커 참고용으로 봐주세요. 표 형식은 예시 이미지를
-        확인하지 못해 합리적으로 구성했습니다 — 원하시는 형태와 다르면 말씀해 주세요.
+        * 성공률 = (해당 1차→2차 조합의 2차 업셀 성공 건수) ÷ (그 1차 담당자의 전체 1차 판매 건수).
+        1차 판매 건수가 적은 조합은 성공률 변동폭이 커 참고용으로 봐주세요.
       </p>
     </div>
   )
