@@ -4,7 +4,7 @@
 //       쓰기는 mock 의 mutateDb 부수효과(§8)를 supabase 호출로 1:1 미러링한다.
 // TODO(live-verify): 대량(15만) 데이터에서는 목록을 server-side 필터/페이지네이션으로 이관해야 함.
 import { type SupabaseClient } from '@supabase/supabase-js'
-import type { Assignment, CallRecording, LottoRound, Member, MemberStatus, Payment, Product, Role, SiteSettings, SmsSend, SmsTemplate, WeeklyRecoIssue } from '@/types/db'
+import type { Assignment, CallAiAnalysis, CallRecording, LottoRound, Member, MemberStatus, Payment, Product, Role, SiteSettings, SmsSend, SmsTemplate, WeeklyRecoIssue } from '@/types/db'
 import { supabase } from '@/lib/supabase'
 import { genId, nowIso } from '@/lib/db/store'
 import { recoSmsBody, renderSms, smsTypeForTemplate } from '@/lib/sms'
@@ -583,6 +583,29 @@ export async function transcribeCallRecording(
     .filter((h) => h.count > 0)
   await saveCallRecordingTranscript(id, recId, j.transcript, keywordHits)
   return { transcript: j.transcript, keywordHits }
+}
+
+/** AI 통화분석(/api/analyze-call, OpenAI) 호출 → 성공/실패요인·스크립트유사성·요약 저장(현장 7/10). */
+export async function analyzeCallRecording(
+  id: string,
+  recId: string,
+  transcript: string,
+): Promise<CallAiAnalysis> {
+  const { data } = await sb().auth.getSession()
+  const token = data.session?.access_token
+  if (!token) throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.')
+  const settings = await fetchSiteSettings()
+  const r = await fetch('/api/analyze-call', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ transcript, script: settings.call_script ?? '' }),
+  })
+  const j = (await r.json().catch(() => ({}))) as { ok?: boolean; analysis?: CallAiAnalysis; message?: string }
+  if (!r.ok || !j.ok || !j.analysis) throw new Error(j.message ?? 'AI 분석에 실패했습니다.')
+  await patchCallRecordings(id, (list) =>
+    list.map((rec) => (rec.id === recId ? { ...rec, ai_analysis: j.analysis, analyzed_at: nowIso() } : rec)),
+  )
+  return j.analysis
 }
 
 export async function bulkUpdateMembers(

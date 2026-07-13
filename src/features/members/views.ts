@@ -2,6 +2,9 @@
 // MembersPage 1개가 ?view= 로 프리셋을 적용한다. 의미 모호한 세그먼트
 // (오늘다비·재시도·중복유입)는 합리적으로 정의하고 docs/ASSUMPTIONS.md 에 기록.
 import type { Grade, Member, MemberStatus, Role } from '@/types/db'
+import { CONSULT_STATUSES, type ConsultStatus } from '@/lib/consultStatus'
+
+export { CONSULT_STATUSES, type ConsultStatus }
 
 // ── 필터 스펙 (모든 세그먼트가 이 형태의 술어 집합으로 표현된다) ──────────
 export interface MemberFilter {
@@ -35,20 +38,6 @@ export interface MemberFilter {
 // "콜 단계/DB구분" 분류로 운영한다. inflow_code(채널)와 별개. DECISIONS.md 참조.
 export const INFLOW_TYPES = ['신규', '하루전부재', '하루전거절', '이틀전', '삼일전', '구디비'] as const
 export type InflowType = (typeof INFLOW_TYPES)[number]
-
-// 상담상태 — 회원정보 입력/관리 시 콜 상담 결과(현장 피드백). 이용자 필터에도 사용.
-export const CONSULT_STATUSES = [
-  '신규',
-  '결번',
-  '부재',
-  '가망',
-  '승인',
-  '통화예약',
-  '도입거절',
-  '일반거절',
-  '기타',
-] as const
-export type ConsultStatus = (typeof CONSULT_STATUSES)[number]
 
 // 페이지당 행 수 옵션(현장 피드백) — 50 고정 → 선택형.
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500, 1000] as const

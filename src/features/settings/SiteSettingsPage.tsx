@@ -67,6 +67,7 @@ const formSchema = z.object({
   win_messages: z.array(z.object({ rank: z.number(), body: z.string().min(1, '문구를 입력하세요.') })),
   call_keywords: z.string(), // 통화 녹음 자동탐지 특정 단어(쉼표 구분) — 현장 피드백 7/3
   call_volume_alert_threshold: z.string(), // 월 통화량(상담상태 변경 건수) 경고 기준
+  call_script: z.string(), // AI 통화분석 기준 스크립트(선택) — 현장 피드백 7/10
 })
 type FormValues = z.infer<typeof formSchema>
 
@@ -93,6 +94,7 @@ function toForm(s: SiteSettings): FormValues {
     win_messages: s.win_messages.map((w) => ({ rank: w.rank, body: w.body })),
     call_keywords: (s.call_keywords ?? ['보장']).join(', '),
     call_volume_alert_threshold: String(s.call_volume_alert_threshold ?? 1000),
+    call_script: s.call_script ?? '',
   }
 }
 
@@ -138,6 +140,7 @@ function toSettings(v: FormValues, prev: SiteSettings): SiteSettings {
     generation_records: prev.generation_records,
     call_keywords: parseTids(v.call_keywords),
     call_volume_alert_threshold: Math.max(1, Number(v.call_volume_alert_threshold) || 1000),
+    call_script: v.call_script,
   }
 }
 
@@ -376,6 +379,18 @@ export function SiteSettingsPage() {
           />
           <p className="mt-1 text-[11.5px] text-gray-400">
             이번 달 상담상태 변경 건수(=발신 통화 근사치)가 이 값을 넘으면 관리자 화면에 경고가 표시됩니다.
+          </p>
+        </FieldRow>
+        <FieldRow label="AI 분석 기준 스크립트" htmlFor="call_script" align="start">
+          <textarea
+            id="call_script"
+            rows={6}
+            className={textareaCls}
+            placeholder="비워두면 AI 통화분석에서 '스크립트 유사성' 항목이 생략됩니다."
+            {...register('call_script')}
+          />
+          <p className="mt-1 text-[11.5px] text-gray-400">
+            회원 상세 통화녹음 탭의 ‘AI 분석’이 전사본과 이 스크립트를 비교해 유사성을 알려줍니다.
           </p>
         </FieldRow>
       </SectionCard>

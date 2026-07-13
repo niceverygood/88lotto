@@ -2,7 +2,7 @@
 // 액션(등급변경·담당변경·정지·아웃콜·문자발송). 모든 액션은 api 뮤테이션 →
 // 관련 쿼리 무효화 + 로그/배정/문자 부수효과를 만든다.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { CreditCard, Dices, Mic, MessageSquare, Play, Send, Sparkles, Trash2, Upload } from 'lucide-react'
+import { CreditCard, Dices, Mic, MessageSquare, Play, Send, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -27,6 +27,7 @@ import {
   readMemos,
   useAddComplaint,
   useAddMemo,
+  useAnalyzeCallRecording,
   useAssignStaff,
   useCallRecordingUrl,
   useDeleteCallRecording,
@@ -1172,6 +1173,7 @@ function CallRecordingRow({
 }) {
   const getUrl = useCallRecordingUrl()
   const transcribe = useTranscribeCallRecording()
+  const analyze = useAnalyzeCallRecording()
   const [playUrl, setPlayUrl] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -1217,6 +1219,23 @@ function CallRecordingRow({
           >
             {rec.transcript ? '다시 변환' : '텍스트 변환'}
           </Button>
+          {rec.transcript && (
+            <Button
+              size="sm"
+              variant="sec"
+              icon={<Wand2 className="h-3.5 w-3.5" />}
+              disabled={analyze.isPending}
+              onClick={() => {
+                setErr(null)
+                analyze.mutate(
+                  { id: memberId, recId: rec.id, transcript: rec.transcript as string },
+                  { onError: (e) => setErr(e instanceof Error ? e.message : 'AI 분석에 실패했습니다.') },
+                )
+              }}
+            >
+              {analyze.isPending ? '분석 중…' : rec.ai_analysis ? '다시 분석' : 'AI 분석'}
+            </Button>
+          )}
           {canDelete && (
             <button
               type="button"
@@ -1244,6 +1263,48 @@ function CallRecordingRow({
                   ‘{h.keyword}’ {h.count}회
                 </span>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+      {rec.ai_analysis && (
+        <div className="mt-2 rounded-md border border-primary-100 bg-primary-50/40 p-2.5">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-primary-700">
+            <Wand2 className="h-3.5 w-3.5" />
+            AI 통화분석
+            {rec.analyzed_at && (
+              <span className="font-mono text-[10px] font-normal text-gray-400 tnum">
+                · {datetime(rec.analyzed_at)}
+              </span>
+            )}
+          </div>
+          {rec.ai_analysis.summary && (
+            <p className="mb-1.5 text-[12px] leading-relaxed text-gray-700">{rec.ai_analysis.summary}</p>
+          )}
+          {rec.ai_analysis.successFactors.length > 0 && (
+            <div className="mb-1">
+              <span className="text-[11px] font-semibold text-success">성공요인</span>
+              <ul className="ml-3.5 list-disc text-[12px] leading-snug text-gray-700">
+                {rec.ai_analysis.successFactors.map((f, i) => (
+                  <li key={i}>{f}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {rec.ai_analysis.failFactors.length > 0 && (
+            <div className="mb-1">
+              <span className="text-[11px] font-semibold text-danger">실패요인</span>
+              <ul className="ml-3.5 list-disc text-[12px] leading-snug text-gray-700">
+                {rec.ai_analysis.failFactors.map((f, i) => (
+                  <li key={i}>{f}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {rec.ai_analysis.scriptMatch && (
+            <div>
+              <span className="text-[11px] font-semibold text-gray-600">스크립트 유사성</span>
+              <p className="text-[12px] leading-snug text-gray-700">{rec.ai_analysis.scriptMatch}</p>
             </div>
           )}
         </div>

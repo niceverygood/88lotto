@@ -4,14 +4,20 @@
 // 항상 최신 조회(staleTime 0 + refetchOnMount) — §8 액션이 바꾼 데이터를 진입 시 즉시 반영.
 import { useQuery } from '@tanstack/react-query'
 import { eachDayOfInterval, format, parseISO } from 'date-fns'
-import type { Grade, Member, Payment, PaymentStatus } from '@/types/db'
+import type { Grade, LogEntry, Member, Payment, PaymentStatus, Staff } from '@/types/db'
 import { readDb } from '@/lib/db/store'
 import { dataSource } from '@/lib/supabase'
 import { fetchTables } from '@/lib/db/remote'
 import { useCurrentUser, type CurrentUser } from '@/lib/auth'
 import { GRADE_LABEL, PAYMENT_METHOD_LABEL } from '@/design-system/labels'
+import {
+  computeConsultReport,
+  type ConsultReportRow,
+  type ReportDimension,
+  type ReportPeriod,
+} from '@/lib/consultReport'
 
-export type StatsView = 'signup' | 'payment' | 'inflow'
+export type StatsView = 'signup' | 'payment' | 'inflow' | 'consult'
 
 const PAID_GRADES: readonly Grade[] = ['gold', 'goldp', 'vip', 'royal']
 const isPaid = (g: Grade): boolean => PAID_GRADES.includes(g)
@@ -291,6 +297,36 @@ export function useStats(q: StatsQuery) {
       for (const pr of db.products) productNames[pr.id] = pr.name
       const payments = scopePayments(db.payments, memberMap, user)
       return paymentStats(payments, productNames, q.from, q.to)
+    },
+    staleTime: 0,
+    refetchOnMount: 'always',
+    placeholderData: (prev) => prev,
+  })
+}
+
+// ── 상담 리포트(유입코드별·상담원별, 주차/월별) — 현장 피드백 7/10 ──────────────
+export interface ConsultReportQuery {
+  dimension: ReportDimension
+  period: ReportPeriod
+  from: string | null
+  to: string | null
+}
+
+export function useConsultReport(q: ConsultReportQuery) {
+  const user = useCurrentUser()
+  return useQuery({
+    queryKey: ['stats', 'consult', q.dimension, q.period, q.from, q.to, user?.id ?? 'anon', user?.role ?? 'none'],
+    queryFn: async (): Promise<ConsultReportRow[]> => {
+      const db =
+        dataSource === 'supabase' ? await fetchTables(['members', 'staff', 'logs']) : readDb()
+      const members = scopeMembers(db.members, user)
+      // computeConsultReport 가 members 스코프 밖 이벤트를 자동 제외한다(팀장/담당 경계 보장).
+      return computeConsultReport(db.logs as LogEntry[], members, db.staff as Staff[], {
+        dimension: q.dimension,
+        period: q.period,
+        from: q.from,
+        to: q.to,
+      })
     },
     staleTime: 0,
     refetchOnMount: 'always',

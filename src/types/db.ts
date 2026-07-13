@@ -335,6 +335,17 @@ export interface CallRecording {
   transcribed_at?: string | null
   keyword_hits?: { keyword: string; count: number }[] // 설정된 특정 단어(예: '보장') 탐지 결과
   source?: 'manual' | 'auto' // 수동 업로드 vs Android 앱 자동업로드(현장 피드백 7/6) — 미설정=manual 취급
+  ai_analysis?: CallAiAnalysis | null // AI 통화분석(현장 피드백 7/10, 정의현 차장) — 전사본 필요
+  analyzed_at?: string | null
+}
+
+// 통화녹음 AI 분석 결과(현장 피드백 7/10) — 전사본을 LLM 에 보내 구조화된 분석을 받는다.
+// scriptMatch 는 site_settings.call_script(기준 스크립트)가 설정된 경우에만 채워진다.
+export interface CallAiAnalysis {
+  successFactors: string[] // 성공요인
+  failFactors: string[] // 실패요인
+  scriptMatch: string | null // 스크립트와의 유사성(기준 스크립트 미설정 시 null)
+  summary: string // 한줄 요약
 }
 
 export interface SiteSettings {
@@ -348,6 +359,7 @@ export interface SiteSettings {
   lotto_exclude_history: LottoExcludeRule[] // 회차별 이력 + 효력일자(§V2-5)
   call_keywords?: string[] // 통화 녹음 자동탐지 특정 단어(예: '보장') — 현장 피드백 7/3
   call_volume_alert_threshold?: number // 월 발신 통화량(상담상태 변경 건수) 경고 기준 — 현장 피드백 7/3, 기본 1000
+  call_script?: string // AI 통화분석의 기준 스크립트(현장 피드백 7/10) — 비우면 유사성 비교 생략
   weekly_free_reco: WeeklyFreeRecoSettings // 무료회원 주간 자동발급(현장 피드백)
   terms: string // 이용약관 본문(공통/기본)
   terms_by_grade?: Partial<Record<Grade, string>> // 등급별 약관(현장 피드백 6/11) — 미설정 등급은 공통 폴백

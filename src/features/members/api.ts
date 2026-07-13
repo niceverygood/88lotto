@@ -738,6 +738,18 @@ export function useTranscribeCallRecording() {
   })
 }
 
+/** AI 통화분석(/api/analyze-call, OpenAI) — 전사본 필요, mock 모드 미지원(현장 피드백 7/10). */
+export function useAnalyzeCallRecording() {
+  const invalidate = useInvalidateMembers()
+  return useMutation({
+    mutationFn: async (v: { id: string; recId: string; transcript: string }) => {
+      if (dataSource !== 'supabase') throw new Error('AI 분석은 라이브(Supabase) 모드에서만 지원됩니다.')
+      return supa.analyzeCallRecording(v.id, v.recId, v.transcript)
+    },
+    onSuccess: (_r, v) => invalidate([v.id]),
+  })
+}
+
 /** 상태/유입분류 등 일괄 패치. */
 export function useBulkUpdateMembers() {
   const user = useCurrentUser()
