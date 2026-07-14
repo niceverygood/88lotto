@@ -29,7 +29,7 @@ export const useUiStore = create<UiState>()(
       setPageMeta: (pageTitle, pageDesc = '') => set({ pageTitle, pageDesc }),
     }),
     {
-      name: 'pluslotto-ui',
+      name: '88lotto-ui',
       partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, density: s.density }),
     },
   ),

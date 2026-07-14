@@ -143,7 +143,7 @@ export const useSessionStore = create<SessionState>()(
       },
     }),
     {
-      name: 'pluslotto-session',
+      name: '88lotto-session',
       partialize: (s) => ({ currentUser: s.currentUser }),
     },
   ),

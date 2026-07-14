@@ -1,7 +1,7 @@
-# 플러스로또 ADMIN — Claude Code 빌드 프롬프트
+# 88로또 ADMIN — Claude Code 빌드 프롬프트
 
 > **사용법**
-> 1. 새 폴더에서 `claude` 실행. 이 파일과 `CLAUDE.md`, `docs/pluslotto_admin_spec.html`을 프로젝트 루트에 둔다.
+> 1. 새 폴더에서 `claude` 실행. 이 파일과 `CLAUDE.md`, `docs/88lotto_admin_spec.html`을 프로젝트 루트에 둔다.
 > 2. 아래 Phase 0부터 순서대로, 각 블록(``` 안의 텍스트)을 그대로 Claude Code에 붙여넣는다.
 > 3. 한 Phase가 끝나면 직접 실행해 확인 → 다음 Phase. **Phase 3(이용자)는 끝까지 완성**한 뒤 진행한다(패턴 확정).
 > 4. 매 Phase 공통 전제: "CLAUDE.md를 먼저 읽고 그 규칙을 100% 따른다. 토큰·구조·연동(§8)·DoD(§10)을 지킨다."
@@ -13,14 +13,14 @@
 ## Phase 0 — 스캐폴드 · 디자인 시스템 · Supabase · 앱 셸
 
 ```
-CLAUDE.md를 읽고 따른다. 플러스로또 운영 콘솔 프로젝트를 초기화한다.
+CLAUDE.md를 읽고 따른다. 88로또 운영 콘솔 프로젝트를 초기화한다.
 
 1. Vite + React 18 + TypeScript(strict) 스캐폴드. Tailwind, React Router v6, TanStack Query v5, TanStack Table v8, @supabase/supabase-js, react-hook-form, zod, recharts, date-fns, lucide-react, zustand 설치.
 2. CLAUDE.md §3의 tokens.css와 tailwind.config.ts를 그대로 생성. index.html에 Pretendard CDN(jsdelivr) 추가. body 기본 폰트/색/tabular-nums 설정.
 3. lib/supabase.ts (env: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY), lib/format.ts(krw/phone/datetime, 전부 tabular), lib/auth.ts(useRole 스텁) 작성. .env.example 추가.
 4. app/providers.tsx (QueryClientProvider + BrowserRouter), app/routes.tsx(빈 라우트 + 역할 가드 골격), app/AppShell.tsx 작성.
-5. AppShell: 좌측 네이비 사이드바(CLAUDE.md §0 13개 메뉴를 운영/고객·세일즈/로또/시스템 4그룹으로, active 인디케이터·카운트 뱃지·접힘 토글) + 상단바(페이지 제목/설명 슬롯 + 계정) + 콘텐츠 Outlet. 스타일은 docs/pluslotto_admin_spec.html의 App Shell 프리뷰와 일치.
-6. 임시 /dashboard 라우트에 "플러스로또 운영 콘솔" 플레이스홀더.
+5. AppShell: 좌측 네이비 사이드바(CLAUDE.md §0 13개 메뉴를 운영/고객·세일즈/로또/시스템 4그룹으로, active 인디케이터·카운트 뱃지·접힘 토글) + 상단바(페이지 제목/설명 슬롯 + 계정) + 콘텐츠 Outlet. 스타일은 docs/88lotto_admin_spec.html의 App Shell 프리뷰와 일치.
+6. 임시 /dashboard 라우트에 "88로또 운영 콘솔" 플레이스홀더.
 
 검수: npm run dev 정상, 사이드바/상단바 렌더, 토큰 적용 확인. docs/ASSUMPTIONS.md, docs/DECISIONS.md 빈 파일 생성.
 ```
@@ -199,4 +199,4 @@ CLAUDE.md §5,§9. 08 관리자/권한, 09 로그(5종)를 추정 구현. admin 
 - Phase가 크면 Claude Code에게 "이 Phase를 todo로 쪼개고 하나씩 진행" 요청.
 - 각 Phase 후 `docs/DECISIONS.md`에 한 일/결정 1~2줄 기록 요청 → 다음 세션 컨텍스트 유지.
 - 미확인 화면은 완성도보다 **연동·구조**를 먼저. 실제 모습은 라이브 캡처로 v0.2에서 보정.
-- 막히면 `docs/pluslotto_admin_spec.html`의 해당 컴포넌트 프리뷰를 근거로 제시.
+- 막히면 `docs/88lotto_admin_spec.html`의 해당 컴포넌트 프리뷰를 근거로 제시.

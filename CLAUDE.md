@@ -1,13 +1,13 @@
-# 플러스로또 ADMIN — CLAUDE.md
+# 88로또 ADMIN — CLAUDE.md
 
 > 이 파일은 매 세션 시작 시 반드시 읽는다. 모든 결정의 단일 기준(Source of Truth)이다.
-> 시각 스타일가이드 원본: `docs/pluslotto_admin_spec.html` (컬러·컴포넌트가 렌더된 살아있는 문서).
+> 시각 스타일가이드 원본: `docs/88lotto_admin_spec.html` (컬러·컴포넌트가 렌더된 살아있는 문서).
 
 ---
 
 ## 0. 프로젝트 개요
 
-**플러스로또 운영 콘솔** — 로또 번호 추천 서비스를 운영하는 **아웃바운드 텔레마케팅 CRM 백오피스**.
+**88로또 운영 콘솔** — 로또 번호 추천 서비스를 운영하는 **아웃바운드 텔레마케팅 CRM 백오피스**.
 일반 사용자 프론트가 아니라 **내부 운영툴**이다. 약 15만 명 규모 회원 DB를 다룬다.
 
 기존 「일행로또」 백오피스(스크린샷 56장)를 역설계해 **기능은 100% 보존**하고 **UX/UI만 직관적으로 재설계**한다.
@@ -78,7 +78,7 @@ src/
 ├─ types/db.ts              # Supabase 생성 타입
 └─ main.tsx
 docs/
-├─ pluslotto_admin_spec.html
+├─ 88lotto_admin_spec.html
 ├─ ASSUMPTIONS.md           # 미확인 화면 추정 결정 로그 (필수 유지)
 └─ DECISIONS.md             # 설계 결정 기록
 ```

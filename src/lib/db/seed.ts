@@ -583,7 +583,7 @@ function buildSiteSettings(): SiteSettings {
       weekday: 1, // 월요일
       day_of_month: 1,
       time: '09:00',
-      recipients: ['ops@pluslotto.co.kr'],
+      recipients: ['ops@88lotto.co.kr'],
       sections: ['revenue', 'signup', 'payment'],
     },
     lotto_exclude: { fixed: [7], excluded: [13, 40] },

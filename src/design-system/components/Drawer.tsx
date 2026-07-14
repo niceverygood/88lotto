@@ -91,7 +91,7 @@ interface Layout {
 }
 
 const MIN_W = 380
-const lsKey = (k: string) => `pluslotto-drawer:${k}`
+const lsKey = (k: string) => `88lotto-drawer:${k}`
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
 const maxW = () => (typeof window !== 'undefined' ? window.innerWidth - 64 : 9999)
 

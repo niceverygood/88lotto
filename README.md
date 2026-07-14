@@ -1,4 +1,4 @@
-# 플러스로또 ADMIN — 운영 콘솔
+# 88로또 ADMIN — 운영 콘솔
 
 로또 번호 추천 서비스를 운영하는 **아웃바운드 텔레마케팅 CRM 백오피스**(내부 운영툴). 약 15만 명 규모 회원 DB를 다룬다. 13개 대분류 모듈로 구성되며, 모든 기능은 다음 운영 흐름을 중심으로 유기적으로 연동된다.
 
@@ -6,7 +6,7 @@
 유입 → 담당 배정 → 아웃콜 → 전환(무료→유료) → 결제(다중 PG) → 번호발송(SMS) → 매출 귀속
 ```
 
-> 설계의 단일 기준은 [`CLAUDE.md`](CLAUDE.md). 시각 스타일가이드 원본은 [`docs/pluslotto_admin_spec.html`](docs/pluslotto_admin_spec.html).
+> 설계의 단일 기준은 [`CLAUDE.md`](CLAUDE.md). 시각 스타일가이드 원본은 [`docs/88lotto_admin_spec.html`](docs/88lotto_admin_spec.html).
 
 ---
 
@@ -56,11 +56,11 @@ VITE_SUPABASE_ANON_KEY=   # Supabase anon public key
 VITE_DATA_SOURCE=         # (옵션) "mock" | "supabase" — 미지정 시 위 두 값 유무로 자동 판단
 ```
 
-- **두 값이 비어 있으면** → `localStorage`(`pluslotto-db`) 기반 mock 데이터 계층으로 자동 폴백. 외부 의존성 없이 전체 운영 플로우가 동작한다(데모/개발용).
+- **두 값이 비어 있으면** → `localStorage`(`88lotto-db`) 기반 mock 데이터 계층으로 자동 폴백. 외부 의존성 없이 전체 운영 플로우가 동작한다(데모/개발용).
 - **두 값을 채우면** → 실 Supabase 로 전환. (마이그레이션/RLS 는 라이브 검증 대기 — 아래 참조)
 - `VITE_DATA_SOURCE` 로 강제 지정 가능.
 
-> mock 데이터 초기화: 브라우저에서 `localStorage` 의 `pluslotto-db` 키를 삭제하면 다음 로드 시 재시드. (시드 구조를 바꾸면 `src/lib/db/store.ts` 의 `DB_VERSION` 을 올린다 → 기존 DB 자동 마이그레이션.)
+> mock 데이터 초기화: 브라우저에서 `localStorage` 의 `88lotto-db` 키를 삭제하면 다음 로드 시 재시드. (시드 구조를 바꾸면 `src/lib/db/store.ts` 의 `DB_VERSION` 을 올린다 → 기존 DB 자동 마이그레이션.)
 
 ---
 
@@ -88,7 +88,7 @@ docs/
 ├─ CLAUDE.md(루트)        # 설계 단일 기준
 ├─ DECISIONS.md           # 설계 결정 기록(D1~)
 ├─ ASSUMPTIONS.md         # 미확인 화면 추정 + 라이브 검증 체크리스트
-└─ pluslotto_admin_spec.html
+└─ 88lotto_admin_spec.html
 ```
 
 규칙: feature 간 직접 import 금지(공유는 `design-system/`·`lib/` 경유). 서버 상태는 전부 TanStack Query, 클라이언트 UI 상태만 zustand. 색·간격은 토큰/Tailwind 유틸만.

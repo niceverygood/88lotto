@@ -554,3 +554,18 @@
 - **요구**: "개별 회원의 담당자는 '팀장'으로 되어있는데, 결제가 이루어진 회원에 관련해서는 1차결제·2차결제·3차결제 각각에 따른 담당자 배정이 이루어질 수 있도록."
 - **조사 결과**: `payments.staff_id` 컬럼과 매출 귀속 로직(`lib/revenueRules.ts` `attribution:'payment_staff'`, `features/revenue/api.ts` groupOf)이 **이미 결제건 단위로 담당자를 구분해서 집계하도록 구현돼 있었음** — 다만 그 값을 결제 생성 시 회원의 현재 `assigned_staff_id`로만 채우고 이후 바꿀 UI가 없었던 것이 문제. 신규 컬럼·마이그레이션 불필요.
 - **구현**: `MemberDrawer` 결제내역 탭 각 행에 ①시간순 회차 배지(1차결제/2차결제…, `payments`를 오름차순 재정렬해 계산) ②담당자 인라인 select(최고관리자만 변경, 회원 상세 상단 '담당' 컨트롤과 동일 패턴) 추가. `useUpdatePaymentStaff`(members/api.ts+supa.ts) 저장 시 `paymentKeys`·`revenueKeys`·`memberKeys.payments` 무효화 → 매출 화면에 즉시 반영.
+
+### D86. 프로젝트 정체성 전면 rename: PlusLotto/pluslotto → 88lotto (현장 7/14, 사용자 확정 요청)
+- **배경**: D66(6/23)에서 고객·운영 노출 브랜드는 '88로또'로 확정했지만, 레포명·폴더명·Vercel 프로젝트·package.json 등 **코드 인프라 식별자는 계속 'PlusLotto'/'pluslotto'로 남아 불일치**했다(D66 코멘트: "코드네임/레포명 PlusLotto 는 유지"). 이후 실제로 별도 '플러스로또' 신규 전산이 착수되면서(7/9~) 이 이름이 재사용 대상이 되어, 사용자가 이번엔 **인프라 식별자까지 전부 88lotto로 통일**하도록 명시 요청.
+- **변경(라이브 URL 깨짐 감수 — 사용자 명시 확인 후 진행)**:
+  - GitHub 저장소: `niceverygood/PlusLotto` → `niceverygood/88lotto` (`gh repo rename`, 로컬 origin 자동 갱신)
+  - Vercel 프로젝트: `plus-lotto` → `88lotto` (`vercel project rename`). **주의**: 프로젝트 rename은 `*.vercel.app` 프로덕션 도메인을 자동으로 옮기지 않음 — `vercel alias set`으로 `88lotto.vercel.app`을 신규 배포에 명시적으로 바인딩해야 했음. 기존 `plus-lotto.vercel.app`은 **의도적으로 유지**(제거 시 제3자가 그 이름을 선점해 피싱 등에 악용할 수 있는 위험 — 보안상 남겨두고 새 URL을 정식으로 병행 사용 권장).
+  - `package.json`/`package-lock.json` name: `pluslotto-admin` → `88lotto-admin`.
+  - localStorage 키 3곳: `pluslotto-ui`(uiStore)·`pluslotto-db`(mock DB, store.ts)·`pluslotto-drawer:*`(Drawer 위치기억) → `88lotto-*`. Zustand persist 세션 캐시 키 `pluslotto-session`(auth.ts) → `88lotto-session`(실제 인증은 Supabase 자체 세션이라 재로그인 불필요, 캐시만 재생성).
+  - 문서: `CLAUDE.md`·`README.md`·`BUILD_PROMPTS.md` 제목/본문의 프로젝트명 + `docs/pluslotto_admin_spec.html` → `docs/88lotto_admin_spec.html`(git mv, 코드 임포트 없음 확인 후 안전 rename). `docs/DECISIONS.md`(이 파일)·`docs/SUPABASE_MIGRATION.md`는 **과거 시점을 기록한 체인지로그라 그대로 보존**(역사 왜곡 방지) — 그 시점엔 실제로 pluslotto였던 게 맞음.
+  - mock 시드(`lib/db/seed.ts`)의 데모용 리포트 수신 이메일 `ops@pluslotto.co.kr` → `ops@88lotto.co.kr`(실제 발송 없는 mock 데이터).
+- **의도적으로 유지(변경 안 함)**:
+  - `AUTH_EMAIL_DOMAIN`(`lib/auth.ts`) / `api/staff-set-password.ts`의 `@pluslotto.local` — 전 직원 로그인 계정의 실제 합성 이메일 도메인. 변경 시 Supabase Auth의 모든 staff 계정 이메일을 함께 마이그레이션해야 하며, 사용자에게 전혀 노출되지 않는 내부 값이라 변경 실익이 없음(D66에서도 동일하게 유지 결정됨).
+  - `android-call-uploader/`(통화녹음 자동업로드 앱, D84)의 Gradle `applicationId`/Kotlin 패키지 `kr.bottlecorp.pluslotto.recuploader` — 이미 상담원 실기기에 빌드·설치된 앱. 패키지명 변경 시 Android가 "다른 앱"으로 인식해 전 기기 삭제 후 재설치가 필요(Kotlin 패키지 트리 전체 이동도 수반) — 별도 조율 없이 이번 작업 범위에서 제외.
+- **검증**: `tsc --noEmit`·`npm run build` 통과. `https://88lotto.vercel.app` 200 확인(새 배포), `https://plus-lotto.vercel.app` 200 유지 확인(구 URL 병행 생존).
+- **후속 필요**: 로컬 프로젝트 폴더명(`/Users/seungsoohan/Projects/PlusLotto`) 변경, Supabase 프로젝트 표시명(대시보드 라벨, API로 변경 불가 — 사용자가 대시보드에서 직접) 안내.

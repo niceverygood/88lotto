@@ -42,7 +42,7 @@ export interface DbShape {
   site_settings: SiteSettings
 }
 
-const DB_KEY = 'pluslotto-db'
+const DB_KEY = '88lotto-db'
 // 시드 구조가 바뀌면 올린다 → 기존 localStorage 가 자동 재시드된다.
 // v7: 계정관리 계층 위임(§5) — nav_access.admins 기본값에 manager·leader 추가.
 // v8: 자동배분 대상 풀(§V2-1) — staff.auto_assign_enabled 추가.
