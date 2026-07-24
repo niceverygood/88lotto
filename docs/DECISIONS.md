@@ -569,3 +569,8 @@
   - `android-call-uploader/`(통화녹음 자동업로드 앱, D84)의 Gradle `applicationId`/Kotlin 패키지 `kr.bottlecorp.pluslotto.recuploader` — 이미 상담원 실기기에 빌드·설치된 앱. 패키지명 변경 시 Android가 "다른 앱"으로 인식해 전 기기 삭제 후 재설치가 필요(Kotlin 패키지 트리 전체 이동도 수반) — 별도 조율 없이 이번 작업 범위에서 제외.
 - **검증**: `tsc --noEmit`·`npm run build` 통과. `https://88lotto.vercel.app` 200 확인(새 배포), `https://plus-lotto.vercel.app` 200 유지 확인(구 URL 병행 생존).
 - **후속 필요**: 로컬 프로젝트 폴더명(`/Users/seungsoohan/Projects/PlusLotto`) 변경, Supabase 프로젝트 표시명(대시보드 라벨, API로 변경 불가 — 사용자가 대시보드에서 직접) 안내.
+
+### D87. 자동조합발송 SMS 하단 문구 삭제 (현장 7/24, 정의현 차장)
+- **배경**: 유료회원 지정요일 조합 자동발송(주간 크론, `api/weekly-reco.ts`)의 SMS 본문 하단에 "홈페이지에서도 확인 가능합니다."가 고정 삽입되고 있었는데, 삭제 요청이 들어왔다. 회원정보창 수동 발송·템플릿 발송은 공유 `src/lib/sms.ts`의 `recoSmsBody()`를 쓰며 애초에 이 문구가 없었다 — 자동발송 크론의 자급자족 사본(`formatComboSms`)에만 있던 문구였다.
+- **조치**: `api/weekly-reco.ts`의 `formatComboSms()`에서 마지막 줄(`\n\n홈페이지에서도 확인 가능합니다.`)을 제거. 그 외 포맷(브랜드 태그·이름·회차·조합 번호 목록)은 그대로 유지.
+- **검증**: `tsc --noEmit`(src) 통과, `api/weekly-reco.ts` 단독 typecheck(node/strict) 통과, 순수 문자열 포맷 함수를 Node 스크립트로 직접 호출해 출력에 "홈페이지" 문구가 더 이상 포함되지 않음을 확인. 크론 자체는 SMS 발송을 실제로 트리거하지 않고는 브라우저로 검증할 수 없어 코드 검증으로 갈음.
