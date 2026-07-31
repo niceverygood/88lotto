@@ -574,3 +574,14 @@
 - **배경**: 유료회원 지정요일 조합 자동발송(주간 크론, `api/weekly-reco.ts`)의 SMS 본문 하단에 "홈페이지에서도 확인 가능합니다."가 고정 삽입되고 있었는데, 삭제 요청이 들어왔다. 회원정보창 수동 발송·템플릿 발송은 공유 `src/lib/sms.ts`의 `recoSmsBody()`를 쓰며 애초에 이 문구가 없었다 — 자동발송 크론의 자급자족 사본(`formatComboSms`)에만 있던 문구였다.
 - **조치**: `api/weekly-reco.ts`의 `formatComboSms()`에서 마지막 줄(`\n\n홈페이지에서도 확인 가능합니다.`)을 제거. 그 외 포맷(브랜드 태그·이름·회차·조합 번호 목록)은 그대로 유지.
 - **검증**: `tsc --noEmit`(src) 통과, `api/weekly-reco.ts` 단독 typecheck(node/strict) 통과, 순수 문자열 포맷 함수를 Node 스크립트로 직접 호출해 출력에 "홈페이지" 문구가 더 이상 포함되지 않음을 확인. 크론 자체는 SMS 발송을 실제로 트리거하지 않고는 브라우저로 검증할 수 없어 코드 검증으로 갈음.
+
+### D88. 문자발송 "실패" 원인 조사·세션 만료 자동 재시도 (현장 7/31, 정의현 차장)
+- **증상**: "88로또 전산에서 문자발송시 '실패'로 나옵니다." — `sms_sends`를 직접 조회하니 오늘 발송 시도(직접입력·추천 여러 건)가 전부 `실패` 상태였다.
+- **조사**: `/api/send-sms`에 `x-internal-secret`(CRON_SECRET, 서버-서버 인증 경로)으로 동일한 내용을 직접 호출해보니 **정상적으로 발송 성공**(`{ok:true, code:"0", cmid:...}`)했다 — 즉 OneShot+고정IP(Fixie) 프록시 인프라 자체는 멀쩡했다. staff 계정(`two029`, 정의현 차장)도 `auth_user_id` 연결이 정상이었다. 남은 차이는 브라우저 세션 인증 경로뿐이었다 — `lib/oneshot.ts`가 `supabase.auth.getSession()`으로 얻은 토큰을 그대로 붙여 보내는데, 탭이 오래 열려있으면 이 토큰이 만료됐는데도 캐시된 옛 값을 그대로 돌려줘 서버가 401(`code:'AUTH'`)로 거절하고, 그 401 응답이 그대로 `sms_sends.status='실패'`로 저장되고 있었다(형제 프로젝트 PlusLotto에서 같은 날 겪은 "옛 JS 번들로 옛 SMS 포맷이 나간다" 문제와 동일한 "오래 열린 탭" 계열 원인).
+- **조치**: `lib/oneshot.ts sendOneShot()`이 첫 시도에서 `code:'AUTH'`를 받으면 `supabase.auth.refreshSession()`으로 세션을 강제 갱신해 새 토큰으로 한 번만 재시도하도록 수정했다. 같은 패턴을 쓰는 PlusLotto 쪽에도 동일 수정을 선제 반영(공용 컴포넌트 버그 동시 반영 원칙).
+- **검증**: `tsc --noEmit`·`npm run build` 통과(로컬 `npm install` 후). `/api/send-sms` 진단 호출로 인프라 자체는 정상임을 실제 발송 성공으로 확인.
+
+### D89. 도메인 별칭 추가 — 88-lotto.vercel.app (현장 7/31, 정의현 차장)
+- **요청**: "88로또 어드민 주소가 plus-lotto.vercel.app 인데 88-lotto.vercel.app 로 변경 가능할까요?"
+- **조치**: `vercel alias set 88lotto.vercel.app 88-lotto.vercel.app`으로 새 별칭 추가. `plus-lotto.vercel.app`은 D86에서 피싱 방지 목적으로 의도적으로 유지하기로 결정한 별칭이라 — 처음 요청을 문자 그대로 "변경"으로 해석해 잠시 제거했다가, D86 기록을 뒤늦게 확인하고 즉시 재등록해 원복했다. 최종적으로 `plus-lotto.vercel.app`(보안 유지용)·`88-lotto.vercel.app`(신규, 안내용)·`88lotto.vercel.app`(원래 기본) 세 별칭이 모두 같은 배포를 가리킨다. 현장에는 앞으로 `88-lotto.vercel.app` 사용을 안내.
+- **검증**: `curl`로 세 URL 모두 200 확인.
