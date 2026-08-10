@@ -585,3 +585,11 @@
 - **요청**: "88로또 어드민 주소가 plus-lotto.vercel.app 인데 88-lotto.vercel.app 로 변경 가능할까요?"
 - **조치**: `vercel alias set 88lotto.vercel.app 88-lotto.vercel.app`으로 새 별칭 추가. `plus-lotto.vercel.app`은 D86에서 피싱 방지 목적으로 의도적으로 유지하기로 결정한 별칭이라 — 처음 요청을 문자 그대로 "변경"으로 해석해 잠시 제거했다가, D86 기록을 뒤늦게 확인하고 즉시 재등록해 원복했다. 최종적으로 `plus-lotto.vercel.app`(보안 유지용)·`88-lotto.vercel.app`(신규, 안내용)·`88lotto.vercel.app`(원래 기본) 세 별칭이 모두 같은 배포를 가리킨다. 현장에는 앞으로 `88-lotto.vercel.app` 사용을 안내.
 - **검증**: `curl`로 세 URL 모두 200 확인.
+
+### D90. 이용자 목록 회차별/등수별 당첨 필터 추가 (현장 8/10, 정의현 차장 — "88로또도 회차별 필터 추가")
+- **배경**: 형제 프로젝트 PlusLotto 에 8/3 추가한 `<당첨자 조회>` 회차/등수 필터(PlusLotto D127)를 88로또에도 달아달라는 요청.
+- **선행 문제**: 88로또에는 회차별 당첨이력 자체가 없었다. `win_history`(최근 1건 문자열, "1236회 5등")만 있고 PlusLotto 의 `meta.win_records`(회차별 누적 배열) 인프라가 통째로 빠져 있어, 필터 UI 만 붙여서는 아무것도 걸리지 않는다. 그래서 이력 적재부터 함께 이식했다.
+- **이식 범위**: ① `src/lib/winHistory.ts`(WinRecord·upsertWinRecords·readWinRecords) ② `confirmRound`(로또기록 '당첨 확정') — 베팅·추천조합 당첨을 조합별 WinRecord 로 만들어 `meta.win_records` 에 멱등 upsert 하고 회원 update 를 1회로 합침 ③ 주간 크론 `api/weekly-lotto-sync.ts` — 자동 적재 회차도 win_records 를 남기도록(PlusLotto 8/10 "1236회차 필터링 안됨" 사고와 동일한 함정을 처음부터 회피) ④ `views.ts` winRound/winRank 필터 ⑤ `MembersPage` 당첨회차(숫자)·당첨등수(1~5) 필터 UI + 활성칩 + URL 동기화(`?wr=`·`?wk=`).
+- **PlusLotto 와의 차이**: 88로또 회원목록은 `admin_members_page` RPC 가 아니라 클라이언트 필터링(`from('members').select('*')`)이라 **DB 마이그레이션이 필요 없다**. PlusLotto 는 같은 기능에 RPC 마이그레이션이 필요했다.
+- **기존 회차 백필**: 배포 시점까지 쌓인 회차는 win_records 가 비어 있어 필터에 안 잡힌다. `로또기록` 화면에서 해당 회차 **'당첨 확정'** 을 누르면 추천조합을 재채점해 채워진다(멱등, 여러 번 눌러도 안전). 이후 회차는 크론이 자동으로 채운다.
+- **검증**: `npm run build`(tsc + vite) green, `api/weekly-lotto-sync.ts` 단독 tsc green.

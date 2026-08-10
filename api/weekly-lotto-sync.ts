@@ -115,6 +115,28 @@ export default async function handler(req: any, res: any) {
       if (m === 3) return 5
       return null
     }
+    // 회원별 당첨내역 누적(meta.win_records) — 이용자 '당첨회차/등수' 필터가 읽는 원본이다.
+    // win_history(최근 1건 문자열)만 갱신하면 크론이 적재한 회차는 필터에 잡히지 않는다
+    // (PlusLotto 8/10 현장 제보 "1236회차가 필터링이 안되고 있습니다" 와 동일한 함정).
+    // src/lib/winHistory.ts 의 WinRecord/upsertWinRecords 를 자급자족 복제(api/ 는 src import 불가).
+    interface WinRecord {
+      round_no: number
+      draw_date: string | null
+      rank: number
+      prize: number
+      combo_index: number
+      source: 'reco' | 'bet'
+    }
+    const prizeForRank = (row: { prize_1: number | null; prize_2: number | null; prize_3: number | null }, rank: number): number =>
+      rank === 1 ? (row.prize_1 ?? 0) : rank === 2 ? (row.prize_2 ?? 0) : rank === 3 ? (row.prize_3 ?? 0) : 0
+    const wrKey = (w: WinRecord) => `${w.source}:${w.round_no}:${w.combo_index}`
+    const upsertWinRecords = (existing: WinRecord[], fresh: WinRecord[]): WinRecord[] => {
+      const map = new Map<string, WinRecord>()
+      for (const w of existing) map.set(wrKey(w), w)
+      for (const w of fresh) map.set(wrKey(w), w)
+      return [...map.values()].sort((a, b) => b.round_no - a.round_no || a.combo_index - b.combo_index)
+    }
+
     const mem: { id: string; meta: Record<string, unknown> | null }[] = []
     for (let from = 0; ; from += 1000) {
       const { data: md } = await sb.from('members').select('id, meta').eq('is_deleted', false).range(from, from + 999)
@@ -132,15 +154,30 @@ export default async function handler(req: any, res: any) {
         if (!issue) continue
         let best: number | null = null
         let wins = 0
-        for (const set of issue.sets) {
+        const fresh: WinRecord[] = []
+        issue.sets.forEach((set, i) => {
           const rk = gRank(set, row.numbers, row.bonus)
-          if (rk != null) {
-            wins += 1
-            if (best === null || rk < best) best = rk
-          }
-        }
+          if (rk == null) return
+          wins += 1
+          if (best === null || rk < best) best = rk
+          fresh.push({
+            round_no: row.round_no,
+            draw_date: row.draw_date,
+            rank: rk,
+            prize: prizeForRank(row, rk),
+            combo_index: i + 1,
+            source: 'reco',
+          })
+        })
         if (best != null) {
-          await sb.from('members').update({ win_history: `${row.round_no}회 ${best}등${wins > 1 ? ` (${wins}건)` : ''}` }).eq('id', m.id)
+          const prevRecords = Array.isArray(m.meta?.win_records) ? (m.meta!.win_records as WinRecord[]) : []
+          await sb
+            .from('members')
+            .update({
+              win_history: `${row.round_no}회 ${best}등${wins > 1 ? ` (${wins}건)` : ''}`,
+              meta: { ...(m.meta ?? {}), win_records: upsertWinRecords(prevRecords, fresh) },
+            })
+            .eq('id', m.id)
           tallied += 1
         }
       }

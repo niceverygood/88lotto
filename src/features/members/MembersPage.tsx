@@ -82,6 +82,8 @@ export function MembersPage() {
   const dupF = get('dup') === '1' // 중복 디비만(현장 피드백)
   const regFromF = get('rf') // 가입일 from (YYYY-MM-DD)
   const regToF = get('rt') // 가입일 to
+  const winRoundF = get('wr') // 당첨회차(<당첨자 조회>)
+  const winRankF = get('wk') // 당첨등수(1~5)
 
   const extra: MemberFilter = {
     grade: gradeF,
@@ -93,6 +95,8 @@ export function MembersPage() {
     dupPhone: dupF || undefined,
     registeredFrom: regFromF,
     registeredTo: regToF,
+    winRound: winRoundF ? Number(winRoundF) : undefined,
+    winRank: winRankF ? Number(winRankF) : undefined,
   }
 
   const query: MembersQuery = {
@@ -173,6 +177,8 @@ export function MembersPage() {
   if (consultF)
     chips.push({ key: 'cs', label: `상담상태: ${consultF}`, onRemove: () => remove('cs') })
   if (dupF) chips.push({ key: 'dup', label: '중복 디비만', onRemove: () => remove('dup') })
+  if (winRoundF) chips.push({ key: 'wr', label: `당첨회차: ${winRoundF}`, onRemove: () => remove('wr') })
+  if (winRankF) chips.push({ key: 'wk', label: `당첨등수: ${winRankF}등`, onRemove: () => remove('wk') })
   if (regFromF || regToF)
     chips.push({
       key: 'reg',
@@ -384,6 +390,31 @@ export function MembersPage() {
               />
               중복 입력된 디비만
             </label>
+          </Field>
+          {/* <당첨자 조회> 회차/등수 필터 — 현장 요청 8/10 (PlusLotto D127 동일 기능 이식) */}
+          <Field label="당첨회차">
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="예: 1180"
+              className={selectCls + ' w-full'}
+              value={winRoundF ?? ''}
+              onChange={(e) => set('wr', e.target.value || null, { resetPage: true })}
+            />
+          </Field>
+          <Field label="당첨등수">
+            <select
+              className={selectCls}
+              value={winRankF ?? ''}
+              onChange={(e) => set('wk', e.target.value || null, { resetPage: true })}
+            >
+              <option value="">전체</option>
+              {[1, 2, 3, 4, 5].map((r) => (
+                <option key={r} value={r}>
+                  {r}등
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
       </FilterBar>
