@@ -497,9 +497,29 @@ const PAID_GRADES = new Set(['gold', 'goldp', 'vip', 'royal'])
 const BRAND_NAME = process.env.VITE_BRAND || '88로또'
 
 /** 조합 목록 → SMS 본문(LMS). 하단 "홈페이지에서도 확인 가능합니다" 문구는 현장 피드백(7/24)으로 삭제. */
-function formatComboSms(name: string, round: number, sets: number[][]): string {
-  const lines = sets.map((s, i) => `${String(i + 1).padStart(2, '0')}. ${s.join(', ')}`)
-  return `[${BRAND_NAME}] ${name || '회원'}님 ${round}회 추천번호 ${sets.length}조합\n\n${lines.join('\n')}`
+/**
+ * 조합 목록 → SMS 본문. src/lib/sms.ts recoSmsBody 와 동일 규칙(자급자족 중복 — 이 파일은 Vercel
+ * 함수 런타임 제약으로 src/ 를 import 하지 못한다. **한쪽을 바꾸면 다른 쪽도 바꿔야 한다.**)
+ *
+ * 본문은 sms_templates 'recommend' 템플릿에서 온다(현장 8/28, 정의현 차장 — "88로또 조합발송
+ * 형식을 플러스로또와 동일하게 바꾸려고 수정을 하는데 반영이 안됩니다"). 이 크론이 템플릿을 읽지
+ * 않아서, 설정에서 무엇을 고쳐도 자동발송 문구가 그대로였다. 플러스로또 8/4 변경(D148)의 이식.
+ * 변수: $round(회차) · $name(회원명) · $num(조합 리스트).
+ */
+const RECO_TEMPLATE_FALLBACK = `[${BRAND_NAME}] $round회 추천번호\n$name님\n$num`
+
+function formatComboSms(
+  name: string,
+  round: number,
+  sets: number[][],
+  templateBody?: string | null,
+): string {
+  const lines = sets.map((s, i) => `[${i + 1}] ${s.join(',')}`).join('\n')
+  const body = templateBody?.trim() ? templateBody : RECO_TEMPLATE_FALLBACK
+  return body
+    .replace(/\$round/g, String(Math.max(0, Math.trunc(round))))
+    .replace(/\$name/g, name || '회원')
+    .replace(/\$num/g, lines)
 }
 
 /** 한국 문자 바이트 길이(비ASCII=2byte). SMS=90byte 기준. (src/lib/oneshot.ts koByteLength 동기화) */
@@ -578,6 +598,12 @@ export default async function handler(req: any, res: any) {
     const smsCfg = settings.sms ?? {}
     const paidSmsOn = !!smsCfg.oneshot_enabled && !!smsCfg.sender_no && !!cfg.paid_sms
     const sender = smsCfg.sender_no ?? ''
+    // 조합문자 본문 템플릿(설정 > 기본문자 템플릿 'recommend', 현장 8/28) — 발송 전 1회만 조회.
+    let recoTplBody: string | null = null
+    if (paidSmsOn) {
+      const { data: tplData } = await sb.from('sms_templates').select('body').eq('key', 'recommend').maybeSingle()
+      recoTplBody = (tplData as { body?: string } | null)?.body ?? null
+    }
     const selfBase =
       process.env.SELF_BASE_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://plus-lotto.vercel.app')
@@ -722,7 +748,7 @@ export default async function handler(req: any, res: any) {
 
       // 유료회원(골드/골드+/VIP/로얄) 지정요일 조합 SMS 자동발송 — 신규 발급분만(멱등).
       if (paidSmsOn && PAID_GRADES.has(r.grade) && r.phone) {
-        const smsBody = formatComboSms(r.name ?? '', targetRound, sets)
+        const smsBody = formatComboSms(r.name ?? '', targetRound, sets, recoTplBody)
         const sres = await sendComboSms(selfBase, r.phone, smsBody, sender)
         await sb.from('sms_sends').insert({
           // 병렬 동시삽입 PK 충돌 방지: 시간+난수+회원 꼬리.

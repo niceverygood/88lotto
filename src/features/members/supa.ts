@@ -776,7 +776,7 @@ export async function sendSms(ids: string[], templateKey: string, actor: string 
         const meta = { ...m.meta, weekly_recos: [issue, ...recos].slice(0, 8) }
         await sb().from('members').update({ meta }).eq('id', m.id)
       }
-      body = recoSmsBody(issue.round_no, issue.sets)
+      body = recoSmsBody(m.name, issue.round_no, issue.sets, tpl?.body)
     } else {
       body = tpl ? renderSms(tpl.body, m) : ''
       if (type === 'marketing' && adOptout) body = `(광고)${body}\n무료거부 ${adOptout}`
@@ -856,8 +856,15 @@ export async function manualIssueReco(
   v: ManualIssueInput,
   actor: string | null,
 ): Promise<{ round_no: number; sets: number[][] }> {
-  const { data: mData } = await sb().from('members').select('id, grade, phone, meta').eq('id', v.memberId).maybeSingle()
-  const member = mData as { id: string; grade: Member['grade']; phone: string; meta: Record<string, unknown> | null } | null
+  // name 은 조합문자 템플릿의 $name 치환에 쓴다(현장 8/28 템플릿화).
+  const { data: mData } = await sb().from('members').select('id, name, grade, phone, meta').eq('id', v.memberId).maybeSingle()
+  const member = mData as {
+    id: string
+    name: string
+    grade: Member['grade']
+    phone: string
+    meta: Record<string, unknown> | null
+  } | null
   if (!member) throw new Error('회원을 찾을 수 없습니다.')
   const { data: sData, error: se } = await sb().from('site_settings').select('*').eq('id', 1).maybeSingle()
   if (se) throw se
@@ -875,7 +882,9 @@ export async function manualIssueReco(
   if (ue) throw ue
 
   if (v.alsoSms) {
-    const body = recoSmsBody(targetRound, res.sets)
+    // 조합문자 본문 = 'recommend' 템플릿(설정 > 기본문자 템플릿, 현장 8/28) — 비었으면 폴백.
+    const { data: tplData } = await sb().from('sms_templates').select('body').eq('key', 'recommend').maybeSingle()
+    const body = recoSmsBody(member.name, targetRound, res.sets, (tplData as { body: string } | null)?.body)
     const { realSend, sender_no } = await fetchSmsConfig()
     let status = '미발송'
     if (realSend) {
