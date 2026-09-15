@@ -580,9 +580,12 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ ok: false, code: 'CONFIG', message: 'SUPABASE_URL/SERVICE_ROLE_KEY 미설정' })
   }
   const force = String(req.query?.force ?? '') === '1'
+  // 시간예산으로 한 번에 못 끝낸 잔여분을 이어받는 후속 실행의 깊이(무한 연쇄 방지).
+  const chain = Math.max(0, Number(req.query?.chain ?? 0) || 0)
   const sb = createClient(url, key, { auth: { persistSession: false } })
 
   try {
+    const startedAt = Date.now() // 시간예산 가드 기준(아래 BUDGET_MS)
     const kst = new Date(Date.now() + 9 * 3600_000)
     const today = kst.getUTCDay() // KST 보정 후 UTC 요일 = KST 요일
     const ts = new Date().toISOString()
@@ -649,19 +652,46 @@ export default async function handler(req: any, res: any) {
       phone: string | null
       meta: Record<string, unknown> | null
     }[] = []
-    for (let from = 0; ; from += 1000) {
-      const { data: mData, error: me } = await sb
+    // 커서(키셋) 페이지네이션 — 오프셋(.range)은 읽는 도중 앞쪽에 행이 끼거나 빠지면 그 뒤가
+    // 한 칸씩 밀려, 페이지 경계 회원이 두 번 읽히거나(중복 발송) 아예 안 읽힌다(조용한 누락).
+    // 09:00 은 신규 가입·상태 변경이 함께 도는 시간이라 실제로 일어난다(형제 프로젝트 PlusLotto
+    // 현장 9/14 — 유료회원 한 명에게 조합문자가 같은 실행에서 두 번 나갔다).
+    const PAGE = 1000
+    let cursor: string | null = null
+    for (;;) {
+      let q = sb
         .from('members')
         .select('id, grade, name, phone, meta')
         .eq('is_deleted', false)
         .eq('is_withdrawn', false)
         .eq('is_suspended', false) // 일시정지(정지) 회원은 자동발급·문자 제외(현장 6/26)
         .order('id')
-        .range(from, from + 999)
+        .limit(PAGE)
+      if (cursor !== null) q = q.gt('id', cursor)
+      const { data: mData, error: me } = await q
       if (me) throw me
       const page = (mData ?? []) as typeof rows
       rows.push(...page)
-      if (page.length < 1000) break
+      if (page.length < PAGE) break
+      cursor = page[page.length - 1].id
+    }
+
+    // 방어선. 커서 방식이면 중복이 나올 수 없지만, 새는 순간 대가가 '유료회원 문자 두 번 +
+    // 발송비 이중 지출'이라 값싼 검사를 한 겹 더 둔다.
+    const seenIds = new Set<string>()
+    const dupIds: string[] = []
+    const uniqueRows = rows.filter((r) => {
+      if (seenIds.has(r.id)) {
+        dupIds.push(r.id)
+        return false
+      }
+      seenIds.add(r.id)
+      return true
+    })
+    if (dupIds.length > 0) {
+      console.warn(
+        `[weekly-reco] 대상 목록에 중복 ${dupIds.length}건 — 제거 후 진행: ${dupIds.slice(0, 10).join(', ')}`,
+      )
     }
 
     let issued = 0
@@ -672,12 +702,12 @@ export default async function handler(req: any, res: any) {
     let errCount = 0
     // 1) 적격 회원 선별(게이트) — CPU만, 빠름. 발급/발송은 2)에서 병렬.
     const eligible: {
-      r: (typeof rows)[number]
+      r: (typeof uniqueRows)[number]
       meta: Record<string, unknown>
       recos: WeeklyRecoIssue[]
       count: number
     }[] = []
-    for (const r of rows) {
+    for (const r of uniqueRows) {
       const meta = r.meta ?? {}
       const day =
         typeof meta.weekly_reco_day === 'number'
@@ -765,9 +795,26 @@ export default async function handler(req: any, res: any) {
         else smsFail++
       }
     }
+    // 유료회원 우선 처리 — 예산을 넘겨 잘리더라도 무료회원 쪽에서 잘리게 한다.
+    // 유료(결제) 회원의 발급 누락이 가장 비싼 실패라서 배열 맨 앞으로 보낸다.
+    eligible.sort((a, b) => Number(PAID_GRADES.has(b.r.grade)) - Number(PAID_GRADES.has(a.r.grade)))
+
+    // 시간예산 가드 (현장 9/15 사고 — 유료회원 1,986명 중 1,035명만 발송되고 나머지 951명이
+    // 발급도 로그도 없이 사라졌다). 이 함수는 vercel.json 의 maxDuration=300초에 걸리면 통째로
+    // 강제 종료되는데, 그러면 뒤쪽 순서의 회원은 그날 발급·문자를 못 받고 그 사실조차 남지 않는다.
+    // 예산을 넘기면 남은 대상을 남겨둔 채 정상 종료(로그 기록)하고, 이어서 처리할 후속 실행을
+    // 스스로 트리거한다 — 한 번에 다 못 해도 여러 번에 나눠 반드시 완주하게 한다.
+    // (재실행은 위 멱등 검사(recos[0].round_no === targetRound)로 이미 처리된 회원을 건너뛴다.)
+    // 형제 프로젝트 PlusLotto 가 7/31 같은 사고 후 넣은 가드인데 이쪽에 반영되지 않아 재발했다.
+    const BUDGET_MS = 240_000 // maxDuration 300초 중 안전 여유를 남긴 값
+    let processed = 0
     for (let i = 0; i < eligible.length; i += CONC) {
-      await Promise.all(eligible.slice(i, i + CONC).map(processOne))
+      if (Date.now() - startedAt > BUDGET_MS) break
+      const slice = eligible.slice(i, i + CONC)
+      await Promise.all(slice.map(processOne))
+      processed += slice.length
     }
+    const remaining = Math.max(0, eligible.length - processed)
 
     await sb.from('logs').insert({
       id: `log_cron_${Date.now().toString(36)}`,
@@ -776,11 +823,26 @@ export default async function handler(req: any, res: any) {
       action: 'reco.weekly_issue',
       target_type: 'member',
       target_id: null,
-      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, errors: errCount, round_no: targetRound, stale_round: staleRound, channel: 'cron', force, sms_sent: smsSent, sms_fail: smsFail },
+      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, errors: errCount, round_no: targetRound, stale_round: staleRound, channel: 'cron', force, sms_sent: smsSent, sms_fail: smsFail, remaining, chain },
       created_at: ts,
     })
 
-    return res.status(200).json({ ok: true, round_no: targetRound, issued, skippedRound, skippedDay, errors: errCount, staleRound, smsSent, smsFail })
+    // 잔여분을 이어서 처리할 후속 실행을 띄운다.
+    // 응답을 기다리지 않는다(자기 자신을 await 하면 이 실행이 타임아웃된다).
+    const MAX_CHAIN = 20
+    if (remaining > 0 && chain < MAX_CHAIN) {
+      try {
+        const nextUrl = `${selfBase}/api/weekly-reco?chain=${chain + 1}${force ? '&force=1' : ''}`
+        await Promise.race([
+          fetch(nextUrl, { method: 'GET', headers: { authorization: `Bearer ${secret}` } }),
+          new Promise((resolve) => setTimeout(resolve, 1500)),
+        ])
+      } catch {
+        /* 후속 트리거 실패는 다음 크론 주기가 회수 — 이번 실행 결과를 실패로 만들지 않는다 */
+      }
+    }
+
+    return res.status(200).json({ ok: true, round_no: targetRound, issued, skippedRound, skippedDay, errors: errCount, staleRound, smsSent, smsFail, remaining, chain })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return res.status(500).json({ ok: false, code: 'ERROR', message })
