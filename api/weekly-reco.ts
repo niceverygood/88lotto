@@ -607,9 +607,17 @@ export default async function handler(req: any, res: any) {
       const { data: tplData } = await sb.from('sms_templates').select('body').eq('key', 'recommend').maybeSingle()
       recoTplBody = (tplData as { body?: string } | null)?.body ?? null
     }
+    // 자기 자신(/api/send-sms, /api/weekly-reco 체인)을 부를 때 쓰는 기준 주소.
+    //
+    // 폴백은 반드시 로컬이어야 한다. 포크 잔재로 형제 프로젝트(PlusLotto)의 운영 도메인이
+    // 박혀 있었는데, VERCEL_URL 이 비는 상황이 오면 88로또의 조합문자가 플러스로또의
+    // /api/send-sms 로 넘어가 **플러스로또의 발신번호·문자 계정으로** 나간다.
+    // CLAUDE.md 는 두 프로젝트의 SMS 발신 계정을 완전히 분리하도록 못박고 있다.
+    // 운영에서는 Vercel 이 VERCEL_URL 을 항상 넣어줘 발동한 적은 없지만, 폴백이 남의
+    // 운영 도메인인 것 자체가 사고 경로다. PlusLotto 와 같은 로컬 폴백으로 맞춘다.
     const selfBase =
       process.env.SELF_BASE_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://plus-lotto.vercel.app')
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
 
     // 무료 자동발급도 OFF, 유료 SMS 도 OFF 면 할 일 없음 → 종료.
     if (!cfg.enabled && !paidSmsOn && !force) return res.status(200).json({ ok: true, skipped: 'disabled' })
