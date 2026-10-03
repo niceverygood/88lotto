@@ -10,7 +10,8 @@
     "api/analyze-call.ts": { "maxDuration": 45 }
   },
   "crons": [
-    { "path": "/api/weekly-lotto-sync", "schedule": "0,30 12 * * 6" },
+    { "path": "/api/weekly-lotto-sync", "schedule": "0,10,20,30,40,50 12 * * 6" },
+    { "path": "/api/weekly-lotto-sync", "schedule": "0,30 13 * * 6" },
     { "path": "/api/weekly-lotto-sync", "schedule": "0 23 * * *" },
     { "path": "/api/weekly-reco", "schedule": "0 0 * * *" },
     { "path": "/api/weekly-reco?audit=1", "schedule": "0 5 * * *" }
