@@ -2,15 +2,53 @@
 // 회차/베팅은 전역 데이터(역할 스코프 없음). '당첨 확정'은 회차 베팅의 등수/당첨금을 산정하고
 // 1~3등 당첨자의 win_history 를 갱신(§8 당첨자 세그먼트) → lotto/bets/members 쿼리 무효화.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import type { Bet, Grade, GenerationRecord, LogEntry, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { genId, mutateDb, nowIso, readDb } from '@/lib/db/store'
-import { dataSource } from '@/lib/supabase'
+import { dataSource, supabase } from '@/lib/supabase'
 import { fetchSiteSettings, fetchTables, patchSiteSettings } from '@/lib/db/remote'
 import { useCurrentUser } from '@/lib/auth'
 import { betKeys, lottoKeys, memberKeys, settingsKeys } from '@/lib/queryKeys'
 import { gradeRank, lottoSum, oddEven, prizeForRank, resolveExcludeForGrade } from '@/lib/lotto'
 import { generateIssueSets } from '@/lib/lottoGenerator'
 import * as supa from './supa'
+import { lottoHealthSchema, type LottoHealth } from './health'
+
+/** Read-only admin/manager health. RPC checks the staff role again; cached results are scoped to the session. */
+export function useLottoHealth() {
+  const user = useCurrentUser()
+  const qc = useQueryClient()
+  const allowed = user?.role === 'admin' || user?.role === 'manager'
+  const query = useQuery({
+    queryKey: [...lottoKeys.all, 'health', user?.id, user?.role],
+    enabled: allowed && dataSource === 'supabase',
+    queryFn: async (): Promise<LottoHealth> => {
+      if (!supabase) throw new Error('운영 연결을 확인할 수 없습니다.')
+      const { data, error } = await supabase.rpc('lotto_sync_health')
+      if (error) throw new Error('자동 집계 상태 조회에 실패했습니다.')
+      const result = lottoHealthSchema.safeParse(data as unknown)
+      if (!result.success) throw new Error('자동 집계 점검 결과를 확인할 수 없습니다.')
+      return result.data
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: 'always',
+    retry: 1,
+  })
+  // A background job may finish while this page stays open. Refresh dependent views only when completion changes.
+  const completed = query.data ? `${query.data.max_confirmed_round}:${query.data.jobs.map((job) => `${job.round_no}:${job.completed_at ?? ''}`).sort().join('|')}` : null
+  const previous = useRef<string | null>(null)
+  useEffect(() => {
+    if (completed && previous.current && completed !== previous.current) {
+      void qc.invalidateQueries({ queryKey: [...lottoKeys.all, 'rounds'] })
+      void qc.invalidateQueries({ queryKey: memberKeys.all })
+      void qc.invalidateQueries({ queryKey: betKeys.all })
+    }
+    previous.current = completed
+  }, [completed, qc])
+  return query
+}
+
 
 export const WEEKLY_FREE_RECO_DEFAULT: import('@/types/db').WeeklyFreeRecoSettings = {
   enabled: true,

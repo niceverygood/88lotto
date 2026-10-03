@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LogOut, PanelLeft } from 'lucide-react'
 import { navIcons } from '@/design-system/icons'
 import { useUiStore } from '@/app/uiStore'
@@ -9,6 +9,7 @@ import { useNavBadges } from '@/lib/navBadges'
 import { canAccessWith, ROLE_LABEL, type NavKey } from '@/lib/permissions'
 import { BRAND } from '@/lib/brand'
 import { cn } from '@/lib/cn'
+import { LottoHealthPanel } from '@/features/lotto/LottoHealthPanel'
 
 interface NavItem {
   key: NavKey
@@ -69,6 +70,7 @@ export function AppShell() {
   const user = useCurrentUser()
   const signOut = useSignOut()
   const navigate = useNavigate()
+  const location = useLocation()
   const { data: navMap } = useNavAccess()
   const navCounts = useNavBadges()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -207,6 +209,7 @@ export function AppShell() {
         </header>
 
         <main className="relative min-h-0 flex-1 overflow-auto bg-gray-50 p-4">
+          {location.pathname !== '/lotto/results' && <LottoHealthPanel compact />}
           <Outlet />
         </main>
       </div>

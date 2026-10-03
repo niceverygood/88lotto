@@ -3,12 +3,11 @@
 //   당첨 확정 → 회차 베팅 등수/당첨금 (재)산정 + 1~3등 회원 win_history 갱신 + confirmed_at + 로그
 //   회차 등록 → 중복 검사 후 미확정 회차 추가 + 로그
 // 회차/베팅은 전역 데이터(RLS 스코프 없음). 읽기(useRounds)는 fetchTables 스냅샷으로 재사용.
-// TODO(live-verify): 회차 베팅 채점은 행 단위 update — 대량 회차는 RPC(set-based)로 이관 권장.
-import type { Bet, Grade, LottoRound, Member, SiteSettings, WeeklyRecoIssue } from '@/types/db'
+// 수동 재집계는 내구성 있는 작업으로 접수하고, 처리 진행과 완료는 health RPC로 확인한다.
+import type { Grade, LottoRound, SiteSettings, WeeklyRecoIssue } from '@/types/db'
 import { nowIso } from '@/lib/db/store'
 import { insertLog, fetchSiteSettings, sb, selectAll } from '@/lib/db/remote'
-import { gradeRank, lottoSum, oddEven, prizeForRank } from '@/lib/lotto'
-import { readWinRecords, upsertWinRecords, type WinRecord } from '@/lib/winHistory'
+import { lottoSum, oddEven } from '@/lib/lotto'
 import { generateIssueSets } from '@/lib/lottoGenerator'
 import {
   resolveExcludeForGrade,
@@ -18,117 +17,13 @@ import {
   type WeeklyIssueResult,
 } from './api'
 
-/** 당첨 확정: 회차 베팅 등수/당첨금 (재)산정 + 회원 win_history/win_records 갱신. 멱등. */
-export async function confirmRound(roundNo: number, actor: string | null): Promise<void> {
-  const { data: rData, error: re } = await sb()
-    .from('lotto_rounds')
-    .select('*')
-    .eq('round_no', roundNo)
-    .maybeSingle()
-  if (re) throw re
-  const round = rData as LottoRound | null
-  if (!round) return
-
-  const { data: bData, error: be } = await sb().from('bets').select('*').eq('round_no', roundNo)
-  if (be) throw be
-  const bets = (bData ?? []) as Bet[]
-
-  // 회원별 당첨내역 누적(meta.win_records) — 이용자 '당첨회차/등수' 필터가 읽는 원본.
-  const freshByMember = new Map<string, WinRecord[]>()
-  const winHistoryByMember = new Map<string, string>()
-  const betIndexByMember = new Map<string, number>()
-  const addFresh = (memberId: string, w: WinRecord) => {
-    const arr = freshByMember.get(memberId) ?? []
-    arr.push(w)
-    freshByMember.set(memberId, arr)
+/** 수동 확정/재집계는 DB 작업으로 접수한다. 실제 집계는 서버가 이어서 처리하며 문자는 보내지 않는다. */
+export async function confirmRound(roundNo: number, _actor: string | null): Promise<void> {
+  const { data, error } = await sb().rpc('lotto_sync_request_recount', { p_round_no: roundNo })
+  if (error) throw new Error(`재집계 접수에 실패했습니다: ${error.message}`)
+  if (!data || typeof data !== 'object' || data.ok !== true) {
+    throw new Error('재집계 접수 결과를 확인하지 못했습니다. 새로고침 후 처리 상태를 확인해 주세요.')
   }
-
-  let winners = 0
-  let prizeSum = 0
-  for (const bet of bets) {
-    const rank = gradeRank(bet.numbers, round.numbers, round.bonus)
-    const prize = prizeForRank(round, rank)
-    const { error } = await sb().from('bets').update({ rank, prize }).eq('id', bet.id)
-    if (error) throw error
-    if (rank != null) {
-      winners += 1
-      prizeSum += prize ?? 0
-    }
-    if (rank != null && rank <= 3 && bet.member_ref) {
-      const idx = (betIndexByMember.get(bet.member_ref) ?? 0) + 1
-      betIndexByMember.set(bet.member_ref, idx)
-      addFresh(bet.member_ref, {
-        round_no: roundNo,
-        draw_date: round.draw_date,
-        rank,
-        prize: prize ?? 0,
-        combo_index: idx,
-        source: 'bet',
-      })
-      winHistoryByMember.set(bet.member_ref, `${roundNo}회 ${rank}등`)
-    }
-  }
-
-  // 추천조합(weekly_recos) 당첨 집계 — 회원이 받은 추천번호를 당첨번호와 대조해 win_history 갱신(현장 6/29).
-  // 실제 서비스는 베팅이 아니라 추천조합 발급이라, 이 집계가 '당첨자' 세그먼트의 실질 기준이다.
-  const members = await selectAll<Member>('members')
-  for (const m of members) {
-    const meta = m.meta ?? {}
-    const recos = Array.isArray(meta.weekly_recos) ? (meta.weekly_recos as WeeklyRecoIssue[]) : []
-    const issue = recos.find((x) => x.round_no === roundNo)
-    if (!issue) continue
-    let best: number | null = null
-    let wins = 0
-    issue.sets.forEach((set, i) => {
-      const rk = gradeRank(set, round.numbers, round.bonus)
-      if (rk == null) return
-      wins += 1
-      if (best === null || rk < best) best = rk
-      addFresh(m.id, {
-        round_no: roundNo,
-        draw_date: round.draw_date,
-        rank: rk,
-        prize: prizeForRank(round, rk) ?? 0,
-        combo_index: i + 1,
-        source: 'reco',
-      })
-    })
-    if (best != null) {
-      winners += 1
-      winHistoryByMember.set(m.id, `${roundNo}회 ${best}등${wins > 1 ? ` (${wins}건)` : ''}`)
-    }
-  }
-
-  // 회원 갱신 — win_history(최근 1건 요약) + win_records(회차별 이력) 를 한 번에 반영.
-  const memberById = new Map(members.map((m) => [m.id, m]))
-  for (const id of new Set([...freshByMember.keys(), ...winHistoryByMember.keys()])) {
-    const m = memberById.get(id)
-    if (!m) continue
-    const patch: Record<string, unknown> = {
-      meta: {
-        ...(m.meta ?? {}),
-        win_records: upsertWinRecords(readWinRecords(m.meta), freshByMember.get(id) ?? []),
-      },
-    }
-    const wh = winHistoryByMember.get(id)
-    if (wh) patch.win_history = wh
-    const { error: we } = await sb().from('members').update(patch).eq('id', id)
-    if (we) throw we
-  }
-
-  const { error: ue } = await sb()
-    .from('lotto_rounds')
-    .update({ confirmed_at: nowIso() })
-    .eq('round_no', roundNo)
-  if (ue) throw ue
-  await insertLog({
-    kind: 'admin',
-    actor,
-    action: 'lotto.confirm',
-    target_type: 'lotto_round',
-    target_id: String(roundNo),
-    meta: { winners, prizeSum },
-  })
 }
 
 /** 회차 등록(당첨번호 입력). 중복 회차는 거부. 미확정 상태로 추가. */
