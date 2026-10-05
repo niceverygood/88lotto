@@ -190,14 +190,14 @@ test('발송 루프와 누락 대조가 판정 함수를 공유한다', async ()
 
   // 각 판정 조건은 파일 전체에서 정확히 한 번(= recoSkipReason 본문)만 나와야 한다.
   for (const expr of [
-    'meta.reco_paused === true',
+    "if (meta.reco_paused === true) return 'paused'",
     'meta.weekly_reco_count === 0',
-    'recos[0]?.round_no === ctx.targetRound',
+    'recos.some(issue => issue?.round_no === ctx.targetRound)',
     '? DEFAULT_DAY',
   ]) {
     assert.equal(count(expr), 1, `판정 조건이 여러 곳에 적혀 있다: ${expr}`)
   }
-  assert.equal(count('recoSkipReason(r, gateCtx)'), 1, '발송 루프가 공용 게이트를 써야 한다')
+  assert.equal(count("recoSkipReason(options.mode === 'manual' ? { ...r, meta: manualMeta } : r, gateCtx)"), 1, '발송 루프가 공용 게이트를 써야 한다')
   assert.equal(count('recoSkipReason(r, ctx)'), 1, '대조가 공용 게이트를 써야 한다')
 })
 

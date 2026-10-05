@@ -40,6 +40,33 @@ async function isAuthorized(req: any): Promise<boolean> {
   }
 }
 
+// 추천 API가 원자 선점 후 전달한 회원을 업체 요청 직전에 다시 확인한다.
+// 회원 ID가 없는 기존 일반 문자 경로의 정책/발신 설정은 바꾸지 않는다.
+async function internalRecoMemberGuard(body: Record<string, unknown>, dest: string): Promise<'clear' | 'held' | 'changed' | 'unavailable'> {
+  if (typeof body.member_id !== 'string' || !body.member_id.trim() || body.member_id.length > 256 || body.source_site !== '88lotto') return 'changed'
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return 'unavailable'
+  try {
+    const admin = createClient(url, key, { auth: { persistSession: false } })
+    const { data, error } = await admin.from('members')
+      .select('id,phone,status,is_deleted,is_withdrawn,is_suspended,meta')
+      .eq('id', body.member_id).abortSignal(AbortSignal.timeout(5_000)).maybeSingle()
+    if (error) return 'unavailable'
+    if (!data || data.id !== body.member_id || typeof data.phone !== 'string' || data.phone.replace(/\D/g, '') !== dest) return 'changed'
+    if (data.status !== 'active' || data.is_deleted !== false || data.is_withdrawn !== false || data.is_suspended !== false) return 'held'
+    const meta: unknown = data.meta ?? {}
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return 'unavailable'
+    const m = meta as Record<string, unknown>
+    if (m.source_site != null && typeof m.source_site !== 'string') return 'changed'
+    const site = typeof m.source_site === 'string' && m.source_site.trim() ? m.source_site.trim() : '88lotto'
+    if (site !== '88lotto') return 'changed'
+    if (m.reco_paused === true) return 'held'
+    if (m.reco_paused != null && typeof m.reco_paused !== 'boolean') return 'unavailable'
+    return 'clear'
+  } catch { return 'unavailable' }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end()
@@ -58,6 +85,14 @@ export default async function handler(req: any, res: any) {
 
     if (!dest || !msg || !sender)
       return res.status(400).json({ ok: false, code: '200', message: '필수 값 누락(dest_phone/msg_body/send_phone)' })
+
+    const internal = !!process.env.CRON_SECRET && req.headers?.['x-internal-secret'] === process.env.CRON_SECRET
+    if (internal && Object.prototype.hasOwnProperty.call(body, 'member_id')) {
+      const guard = await internalRecoMemberGuard(body as Record<string, unknown>, dest)
+      if (guard !== 'clear') return res.status(guard === 'unavailable' ? 503 : guard === 'held' ? 423 : 409)
+        .json({ ok: false, code: guard === 'unavailable' ? 'RECO_MEMBER_CHECK_UNAVAILABLE' : guard === 'held' ? 'RECO_MEMBER_HELD' : 'RECO_MEMBER_CHANGED',
+          message: '현재 회원정보 또는 보류 상태를 확인할 수 없어 업체에 요청하지 않았습니다.' })
+    }
 
     // ── Solapi 경로 (API키 HMAC 인증 → 고정IP/프록시 불필요). 키 설정 시 우선 사용. Fixie 한도 영구 해소(현장 6/30). ──
     // SOLAPI_ENABLED='true' 일 때만 Solapi 사용(IP화이트리스트 해제 검증 후 활성화). 그 전엔 OneShot 유지(현장 6/30).
