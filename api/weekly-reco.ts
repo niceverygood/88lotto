@@ -1,4 +1,4 @@
-// Vercel 크론 함수 — 회원 추천조합 자동발급(현장 피드백, 문자발송 X).
+// 88로또 추천조합 발급 API — 기존 생성 규칙을 유지하고 발급·문자 요청을 원자 선점한다.
 // vercel.json crons 가 매일 00:00 UTC(=09:00 KST) 호출.
 // 대상(현장 피드백 6/11 <추천번호> 7): ① 무료회원 = 기본 금요일(회원별 weekly_reco_day 우선)
 // ② 유료 등 그 외 등급 = 회원정보창에 발송요일이 '설정된' 회원만, 그 요일에 발급.
@@ -8,8 +8,9 @@
 // src/lib/lottoGenerator.ts 의 생성 로직 사본 + 최소 타입을 인라인한다(원본 수정 시 동기화).
 //
 // Vercel 환경변수: SUPABASE_URL(또는 VITE_SUPABASE_URL) / SUPABASE_SERVICE_ROLE_KEY / CRON_SECRET
-// 수동 테스트: GET /api/weekly-reco?force=1 (Authorization: Bearer $CRON_SECRET)
+// 사전점검: GET ?dryRun=1 또는 POST { memberIds, dryRun: true }. 실발급은 DB 원자 선점 후 요청한다.
 import { createClient } from '@supabase/supabase-js'
+import { randomUUID } from 'node:crypto'
 
 // ── 최소 타입(소스: src/types/db.ts) ─────────────────────────────────────────
 interface LottoRound {
@@ -532,10 +533,12 @@ function koByteLength(s: string): number {
 /** 검증된 발송 함수(/api/send-sms, Fixie 프록시 경유)를 재사용해 1건 발송. */
 async function sendComboSms(
   base: string,
+  memberId: string,
   dest: string,
   body: string,
   sender: string,
-): Promise<{ ok: boolean; code?: string }> {
+  sourceSite: string,
+): Promise<{ outcome: 'accepted' | 'rejected' | 'unknown'; code: string; receipt: Record<string, unknown> }> {
   try {
     const r = await fetch(`${base}/api/send-sms`, {
       method: 'POST',
@@ -546,23 +549,30 @@ async function sendComboSms(
       },
       // msgType 명시(D68): 조합 본문은 90byte 초과라 LMS — 미지정 시 SMS 로 처리돼 402 길이초과 전건 실패.
       body: JSON.stringify({
+        member_id: memberId,
+        source_site: sourceSite,
         dest_phone: dest,
         msg_body: body,
         send_phone: sender,
         msgType: koByteLength(body) <= 90 ? 'SMS' : 'LMS',
       }),
+      signal: AbortSignal.timeout(20_000),
     })
-    const d = (await r.json()) as { ok?: boolean; code?: string }
-    return { ok: !!d.ok, code: d.code }
+    const d: unknown = await r.json()
+    if (!object(d)) return { outcome: 'unknown', code: 'INVALID_RESPONSE', receipt: { code: 'INVALID_RESPONSE', httpStatus: r.status, body } }
+    const code = typeof d.code === 'string' && d.code ? d.code : 'UNKNOWN'
+    const outcome = r.ok && d.ok === true && code !== 'UNKNOWN' ? 'accepted'
+      : d.ok === false && !['UNKNOWN', 'NET', 'NET_ERR', 'EXCEPTION'].includes(code) ? 'rejected' : 'unknown'
+    return { outcome, code, receipt: { code, cmid: typeof d.cmid === 'string' ? d.cmid : null,
+      httpStatus: r.status, body } }
   } catch {
-    return { ok: false, code: 'NET' }
+    return { outcome: 'unknown', code: 'NET', receipt: { code: 'NET', body } }
   }
 }
 
 // ── 크론 핸들러 ───────────────────────────────────────────────────────────────
 const DEFAULT_DAY = 5 // 금요일(0=일..6=토)
 const DEFAULT_COUNT = 30
-const KEEP = 8
 
 /** Date.now() 계열 값을 한국 영업일(YYYY-MM-DD)로 고정한다. */
 export function kstDay(nowMs: number): string {
@@ -615,7 +625,7 @@ export function recoSkipReason(
   // 발송갯수 명시적 0 → 발급·문자 제외(현장 6/26).
   if (meta.weekly_reco_count === 0) return 'count-zero'
   const recos = Array.isArray(meta.weekly_recos) ? (meta.weekly_recos as WeeklyRecoIssue[]) : []
-  if (recos[0]?.round_no === ctx.targetRound) return 'already'
+  if (recos.some(issue => issue?.round_no === ctx.targetRound)) return 'already'
   return null
 }
 
@@ -748,27 +758,31 @@ export interface MemberScanRow {
   phone: string | null
   meta: Record<string, unknown> | null
   registered_at: string | null
+  assigned_staff_id?: string | null
 }
 
 /**
  * 발급·대조 대상 회원 전체 스캔.
  *
- * 커서(id 오름차순 + gt) 방식 — offset(.range)은 읽는 도중 행이 끼거나 빠지면 페이지 경계가
- * 밀려 같은 회원을 두 번 읽거나(이중 발송) 건너뛴다(조용한 누락).
+ * offset(range) 이 아니라 커서(id 오름차순 + gt) 로 읽는다. offset 은 읽는 도중 회원이 추가·삭제되면
+ * 페이지 경계가 밀려 같은 회원을 두 번 읽거나(문자 이중발송) 건너뛴다(발송 누락). 커서는 "마지막으로
+ * 읽은 id 다음부터"라 동시 변경과 무관하게 각 행을 정확히 한 번 읽는다.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function scanMembers(sb: any, page: number): Promise<MemberScanRow[]> {
+async function scanMembers(sb: any, page: number, memberIds?: string[]): Promise<MemberScanRow[]> {
   const rows: MemberScanRow[] = []
   let cursor: string | null = null
   for (;;) {
     let q = sb
       .from('members')
-      .select('id, grade, name, phone, meta, registered_at')
+      .select('id, grade, name, phone, meta, registered_at, assigned_staff_id, status')
+      .eq('status', 'active')
       .eq('is_deleted', false)
       .eq('is_withdrawn', false)
       .eq('is_suspended', false) // 일시정지(정지) 회원은 자동발급·문자 제외(현장 6/26)
       .order('id')
       .limit(page)
+    if (memberIds) q = q.in('id', memberIds)
     if (cursor !== null) q = q.gt('id', cursor)
     const { data, error } = await q
     if (error) throw error
@@ -780,9 +794,100 @@ async function scanMembers(sb: any, page: number): Promise<MemberScanRow[]> {
   return rows
 }
 
+interface RecoRequest {
+  method?: string
+  headers?: Record<string, string | string[] | undefined>
+  query?: Record<string, unknown>
+  body?: unknown
+}
+interface RecoResponse {
+  status(code: number): RecoResponse
+  json(body: Record<string, unknown>): unknown
+}
+interface RecoOptions {
+  memberIds?: string[]
+  mode: 'scheduled' | 'manual'
+  dryRun: boolean
+  auditOnly: boolean
+  chain: number
+  alsoSms: boolean
+  setCount?: number
+  expectedRound?: number
+}
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** Mirrors fail-closed claim validation without mutating state during a preview. */
+export function recoContextProblem(meta: Record<string, unknown>): string | null {
+  if (meta.reco_paused === true) return 'HELD'
+  if (meta.reco_paused != null && typeof meta.reco_paused !== 'boolean') return 'INVALID_HOLD'
+  if (meta.source_site != null && typeof meta.source_site !== 'string') return 'INVALID_SITE'
+  const site = typeof meta.source_site === 'string' && meta.source_site.trim() ? meta.source_site.trim() : '88lotto'
+  if (!['88lotto'].includes(site)) return 'INVALID_SITE'
+  if ('weekly_recos' in meta && !Array.isArray(meta.weekly_recos)) return 'INVALID_HISTORY'
+  if (meta.weekly_reco_day != null && (!Number.isInteger(meta.weekly_reco_day) || Number(meta.weekly_reco_day) < 0 || Number(meta.weekly_reco_day) > 6)) return 'INVALID_DAY'
+  if (meta.weekly_reco_count != null && (!Number.isInteger(meta.weekly_reco_count) || Number(meta.weekly_reco_count) < 0 || Number(meta.weekly_reco_count) > 9999)) return 'INVALID_COUNT'
+  return null
+}
+
+/** Unknown targeting/dry-run hints must never fall through to a whole-population run. */
+export function parseRecoRequest(req: RecoRequest): RecoOptions {
+  const query = req.query ?? {}
+  const method = req.method ?? 'GET'
+  if (method !== 'GET' && method !== 'POST') throw new Error('GET 또는 POST 요청만 허용됩니다.')
+  if (method === 'GET') {
+    if (Object.keys(query).some(k => !['audit', 'chain', 'dryRun', 'force'].includes(k)))
+      throw new Error('지원하지 않는 실행 범위입니다. 명확한 회원 ID 목록은 POST로 전달해 주세요.')
+    for (const key of ['audit', 'dryRun', 'force']) {
+      if (query[key] !== undefined && query[key] !== '0' && query[key] !== '1') throw new Error('잘못된 실행 옵션입니다.')
+    }
+    if (query.force === '1') throw new Error('전체 강제 발급은 중지했습니다. 수동 발급은 정확한 회원 1명을 지정해 주세요.')
+    const rawChain = query.chain ?? '0'
+    if (typeof rawChain !== 'string' || !/^\d+$/.test(rawChain) || Number(rawChain) > 20) throw new Error('잘못된 연속 실행 값입니다.')
+    if (query.audit === '1' && query.dryRun === '1') throw new Error('대조와 dryRun을 함께 실행할 수 없습니다.')
+    return { mode: 'scheduled', dryRun: query.dryRun === '1', auditOnly: query.audit === '1', chain: Number(rawChain), alsoSms: true }
+  }
+  if (Object.keys(query).length) throw new Error('POST 실행 옵션은 본문에만 전달해 주세요.')
+  const body: unknown = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
+  if (!object(body) || Object.keys(body).some(k => !['memberIds', 'mode', 'dryRun', 'alsoSms', 'setCount', 'expectedRound'].includes(k)))
+    throw new Error('잘못된 실행 요청입니다.')
+  const ids = body.memberIds
+  if (!Array.isArray(ids) || !ids.length || ids.length > 50 || ids.some(id => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(id)) || new Set(ids).size !== ids.length)
+    throw new Error('중복 없는 회원 ID 1~50개가 필요합니다.')
+  const mode = body.mode ?? 'scheduled'
+  if (mode !== 'scheduled' && mode !== 'manual') throw new Error('잘못된 발급 방식입니다.')
+  if (mode === 'manual' && ids.length !== 1) throw new Error('수동 발급은 회원 1명만 지정할 수 있습니다.')
+  for (const key of ['dryRun', 'alsoSms']) if (body[key] !== undefined && typeof body[key] !== 'boolean') throw new Error('실행 옵션은 boolean 값이어야 합니다.')
+  if (body.setCount !== undefined && (mode !== 'manual' || !Number.isInteger(body.setCount) || Number(body.setCount) < 1 || Number(body.setCount) > 100))
+    throw new Error('수동 조합 수는 1~100의 정수여야 합니다.')
+  if (body.expectedRound !== undefined && (!Number.isInteger(body.expectedRound) || Number(body.expectedRound) < 1)) throw new Error('회차는 양의 정수여야 합니다.')
+  if (mode === 'scheduled' && body.alsoSms === false) throw new Error('예정 발급에서는 문자 옵션을 임의로 끌 수 없습니다.')
+  return { memberIds: ids as string[], mode, dryRun: body.dryRun === true, auditOnly: false, chain: 0,
+    alsoSms: body.alsoSms !== false, setCount: body.setCount as number | undefined, expectedRound: body.expectedRound as number | undefined }
+}
+
+type RecoCaller = { kind: 'cron'; actor: null } | { kind: 'staff'; actor: string; role: string }
+async function authorizeReco(req: RecoRequest, url: string, key: string, secret: string | undefined, scoped: boolean): Promise<RecoCaller | null> {
+  const authorization = req.headers?.authorization
+  if (secret && authorization === `Bearer ${secret}`) return { kind: 'cron', actor: null }
+  if (!scoped || typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) return null
+  const token = authorization.slice(7)
+  const sb = createClient(url, key, { auth: { persistSession: false } })
+  try {
+    const { data, error } = await sb.auth.getUser(token)
+    if (error || !data.user?.id) return null
+    const result = await sb.from('staff').select('id, role, is_active').eq('auth_user_id', data.user.id).abortSignal(AbortSignal.timeout(5_000)).maybeSingle()
+    const staff: unknown = result.data
+    if (result.error || !object(staff) || staff.is_active !== true || typeof staff.id !== 'string'
+      || typeof staff.role !== 'string' || !['admin', 'manager', 'leader', 'rep'].includes(staff.role)) return null
+    return { kind: 'staff', actor: staff.id, role: staff.role }
+  } catch { return null }
+}
+
 /** 이번 회차 조합문자 발송 기록(성공/실패) 회원 id 집합. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function scanRecoSms(sb: any, sinceIso: string, page: number): Promise<{ ok: Set<string>; fail: Set<string> }> {
+export async function scanRecoSms(sb: any, sinceIso: string, page: number): Promise<{ ok: Set<string>; fail: Set<string> }> {
   const ok = new Set<string>()
   const fail = new Set<string>()
   let cursor: string | null = null
@@ -801,7 +906,7 @@ async function scanRecoSms(sb: any, sinceIso: string, page: number): Promise<{ o
     for (const row of got) {
       if (!row.member_id) continue
       // 같은 회원에 성공·실패가 섞이면(재발송) 성공을 우선한다 — 받은 사람은 누락이 아니다.
-      if (row.status === '발송완료') {
+      if (row.status === '발송완료' || row.status === '발송완료(재발송)') {
         ok.add(row.member_id)
         fail.delete(row.member_id)
       } else if (!ok.has(row.member_id)) {
@@ -814,32 +919,35 @@ async function scanRecoSms(sb: any, sinceIso: string, page: number): Promise<{ o
   return { ok, fail }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default async function handler(req: any, res: any) {
-  // fail-closed(D68): CRON_SECRET 미설정이면 '열림'이 아니라 '차단'. 미설정을 가시화.
+export default async function handler(req: RecoRequest, res: RecoResponse) {
+  let options: RecoOptions
+  try { options = parseRecoRequest(req) } catch (error) {
+    return res.status(400).json({ ok: false, code: 'PARAM', message: error instanceof Error ? error.message : '잘못된 요청입니다.' })
+  }
   const secret = process.env.CRON_SECRET
   if (!secret) {
     return res.status(500).json({ ok: false, code: 'CONFIG', message: 'CRON_SECRET 미설정' })
-  }
-  if (req.headers?.authorization !== `Bearer ${secret}`) {
-    return res.status(401).json({ ok: false, code: 'AUTH' })
   }
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) {
     return res.status(500).json({ ok: false, code: 'CONFIG', message: 'SUPABASE_URL/SERVICE_ROLE_KEY 미설정' })
   }
-  const force = String(req.query?.force ?? '') === '1'
-  // 발송은 하지 않고 누락 대조만 수행. 발송 경로와 상호 배타 — 대조 실행이 또 다른 대조를
-  // 부르지 않도록 아래 자동 트리거보다 먼저 분기한다.
-  const auditOnly = String(req.query?.audit ?? '') === '1'
-  // 시간예산으로 한 번에 못 끝낸 잔여분을 이어받는 후속 실행의 깊이(무한 연쇄 방지).
-  const chain = Math.max(0, Number(req.query?.chain ?? 0) || 0)
+  const caller = await authorizeReco(req, url, key, secret, !!options.memberIds)
+  if (!caller) return res.status(401).json({ ok: false, code: 'AUTH' })
+  const force = options.mode === 'manual'
+  // 발송은 하지 않고 누락 대조만 수행(현장 9/12 요청). 발송 경로와 상호 배타 — 대조 실행이
+  // 또 다른 대조를 부르지 않도록 아래 자동 트리거보다 먼저 분기한다.
+  const auditOnly = options.auditOnly
+  // 시간예산 초과로 나눠 실행될 때 무한 연쇄를 막는 안전장치(자기 재호출 횟수).
+  const chain = options.chain
+  const startedAt = Date.now()
   const sb = createClient(url, key, { auth: { persistSession: false } })
 
   try {
-    const startedAt = Date.now() // 시간예산 가드 기준(아래 BUDGET_MS)
-    const kst = new Date(Date.now() + 9 * 3600_000)
+    const nowMs = Date.now()
+    const kst = new Date(nowMs + 9 * 3600_000)
+    const todayKst = kstDay(nowMs)
     const today = kst.getUTCDay() // KST 보정 후 UTC 요일 = KST 요일
     const ts = new Date().toISOString()
 
@@ -852,28 +960,21 @@ export default async function handler(req: any, res: any) {
     // 유료회원 지정요일 조합 SMS — 전용 토글(paid_sms) + 실발송(oneshot_enabled) + 발신번호 모두 충족 시만.
     // (무료 자동발급 cfg.enabled 와 독립 — 무료만 꺼도 유료 SMS 는 계속 동작. D68 #12)
     const smsCfg = settings.sms ?? {}
-    const paidSmsOn = !!smsCfg.oneshot_enabled && !!smsCfg.sender_no && !!cfg.paid_sms
-    const sender = smsCfg.sender_no ?? ''
-    // 조합문자 본문 템플릿(설정 > 기본문자 템플릿 'recommend', 현장 8/28) — 발송 전 1회만 조회.
+    const paidSmsOn = !!smsCfg.oneshot_enabled && !!cfg.paid_sms
+    const manualSmsOn = options.alsoSms && !!smsCfg.oneshot_enabled
+    const senderFor = (_site: string): string => String(smsCfg.sender_no ?? '').replace(/\D/g, '')
+    // 조합문자 본문 템플릿(설정 > 기본문자 템플릿 'recommend', 현장 8/4) — 발송 전 1회 조회.
     let recoTplBody: string | null = null
-    if (paidSmsOn) {
+    if (paidSmsOn || (options.mode === 'manual' && manualSmsOn)) {
       const { data: tplData } = await sb.from('sms_templates').select('body').eq('key', 'recommend').maybeSingle()
       recoTplBody = (tplData as { body?: string } | null)?.body ?? null
     }
-    // 자기 자신(/api/send-sms, /api/weekly-reco 체인)을 부를 때 쓰는 기준 주소.
-    //
-    // 폴백은 반드시 로컬이어야 한다. 포크 잔재로 형제 프로젝트(PlusLotto)의 운영 도메인이
-    // 박혀 있었는데, VERCEL_URL 이 비는 상황이 오면 88로또의 조합문자가 플러스로또의
-    // /api/send-sms 로 넘어가 **플러스로또의 발신번호·문자 계정으로** 나간다.
-    // CLAUDE.md 는 두 프로젝트의 SMS 발신 계정을 완전히 분리하도록 못박고 있다.
-    // 운영에서는 Vercel 이 VERCEL_URL 을 항상 넣어줘 발동한 적은 없지만, 폴백이 남의
-    // 운영 도메인인 것 자체가 사고 경로다. PlusLotto 와 같은 로컬 폴백으로 맞춘다.
     const selfBase =
       process.env.SELF_BASE_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
 
     // 무료 자동발급도 OFF, 유료 SMS 도 OFF 면 할 일 없음 → 종료.
-    if (!cfg.enabled && !paidSmsOn && !force) return res.status(200).json({ ok: true, skipped: 'disabled' })
+    if (!cfg.enabled && !paidSmsOn && !force) return res.status(200).json({ ok: true, skipped: 'disabled', dryRun: options.dryRun, issued: 0, smsSent: 0 })
 
     // PostgREST 1000행 캡 회피 — range 페이지네이션으로 전 회차 조회.
     const rounds: LottoRound[] = []
@@ -885,6 +986,8 @@ export default async function handler(req: any, res: any) {
       if (page.length < 1000) break
     }
     const targetRound = rounds.reduce((mx, r) => Math.max(mx, r.round_no), 0) + 1
+    if (!rounds.length || (options.expectedRound !== undefined && targetRound !== options.expectedRound))
+      return res.status(409).json({ ok: false, code: 'ROUND_CHANGED', message: '최신 회차를 다시 확인해 주세요.', round_no: targetRound })
     // 적재 지연 감지(D68 #13, 비차단): 최신 회차 추첨일이 8일+ 지났으면 lotto 자동적재가 밀린 상태일 수 있어
     // targetRound 가 '이미 지난 회차'를 가리킬 위험 → 발급은 막지 않되 로그로 가시화(운영 점검 신호).
     const newest = rounds.reduce<LottoRound | null>((a, r) => (!a || r.round_no > a.round_no ? r : a), null)
@@ -892,17 +995,18 @@ export default async function handler(req: any, res: any) {
     if (staleRound) {
       console.warn(`[weekly-reco] 최신 회차(${newest?.round_no}) 추첨일 8일+ 경과 — 회차 적재 지연 의심, targetRound=${targetRound}`)
     }
+    if (staleRound && options.memberIds)
+      return res.status(409).json({ ok: false, code: 'STALE_ROUND', message: '최신 추첨 회차가 확인되지 않아 지정 발급을 중지했습니다.' })
     const baseCount = Math.max(1, cfg.set_count || DEFAULT_COUNT)
 
     // ── 발송 후 누락 대조(audit=1) ───────────────────────────────────────────────
-    // 2026-09-16 유료회원 951명이 조용히 누락됐고 전산은 아무것도 알려주지 않았다.
-    // 발송은 하지 않고 "받아야 했는데 못 받은 회원"만 추려 로그로 남긴다. 정상 발송이 끝나면
-    // 아래에서 자동으로 이 경로를 한 번 호출하고, vercel.json 크론이 백스톱으로 한 번 더 돈다
-    // (발송 함수가 로그도 못 남기고 죽은 경우를 잡기 위함).
+    // 발송은 하지 않고 "받아야 했는데 못 받은 회원"만 추려 로그로 남긴다.
+    // 정상 발송이 끝나면 아래에서 자동으로 이 경로를 한 번 호출하고, vercel.json 의 별도 크론이
+    // 백스톱으로 한 번 더 돈다(발송 함수가 로그도 못 남기고 죽은 경우를 잡기 위함 — 7/31 사고 유형).
     if (auditOnly) {
       // 대조 기준 시각 = 이번 회차 발송이 시작된 시각. 이 시각 이후 가입자는 애초에 대상이
-      // 아니므로 누락이 아니다. 발송 로그에 기록된 실제 시작시각을 쓰고, 로그조차 없으면
-      // KST 오늘 0시로 넉넉히 잡는다 — 넓게 잡을수록 허위가 준다.
+      // 아니었으므로 누락이 아니다. 발송 로그에 기록된 실제 시작시각을 쓰고, 로그조차 없으면
+      // (함수가 기록 전에 죽은 경우) KST 오늘 0시로 넉넉히 잡는다 — 넓게 잡을수록 허위가 준다.
       const { data: logData } = await sb
         .from('logs')
         .select('created_at, meta')
@@ -915,7 +1019,7 @@ export default async function handler(req: any, res: any) {
       const sinceIso =
         typeof loggedStart === 'string' && loggedStart
           ? loggedStart
-          : new Date(`${kstDay(startedAt)}T00:00:00+09:00`).toISOString()
+          : new Date(`${todayKst}T00:00:00+09:00`).toISOString()
 
       const auditRows = await scanMembers(sb, 1000)
       const sms = await scanRecoSms(sb, sinceIso, 1000)
@@ -984,12 +1088,32 @@ export default async function handler(req: any, res: any) {
     }
 
     // 전 등급 조회 — 무료=기본 금요일, 그 외 등급=발송요일 설정된 회원만(6/11 피드백).
-    // 대량(15만) 대비 커서(키셋) 페이지네이션 — scanMembers 참조.
+    // 대량(15만) 대비 페이지네이션 — 커서(키셋) 방식.
+    //
+    // 왜 오프셋(.range)을 쓰지 않는가 (현장 9/14 사고)
+    //   오프셋은 "앞에서 N개 건너뛰고 1000개"라서, 읽는 도중 앞쪽에 행이 하나 끼어들거나
+    //   빠지면 그 뒤 전체가 한 칸씩 밀린다. 밀리는 방향에 따라 페이지 경계의 회원이
+    //   **두 번 읽히거나**(중복 발송) **아예 안 읽힌다**(조용한 누락). 09:00 발송 시점은
+    //   신규 가입·상태 변경·레거시 적재가 함께 도는 시간이라 이 흔들림이 실제로 일어난다.
+    //
+    //   2026-09-14 실제 사고: 유료회원 한 명에게 1242회차 조합문자가 같은 실행에서 두 번
+    //   나갔다. 증거 — sms_sends 두 행의 member_id 가 동일, sent_at 이 밀리초까지 동일
+    //   (ts 는 실행당 한 번 계산되므로 같은 실행), 행 id 의 시각 접두사만 1ms 차이.
+    //   즉 대상 목록에 같은 회원이 두 번 들어갔고, 멱등 검사(recos[0].round_no)는 목록을
+    //   만들 때 한 번만 보므로 두 번째를 막지 못한다.
+    //
+    //   커서 방식은 "마지막으로 읽은 id 다음부터"라서 동시 삽입·삭제와 무관하게 각 행을
+    //   정확히 한 번 읽는다. 누락 쪽도 같이 닫힌다.
     const PAGE = 1000
-    const rows: MemberScanRow[] = await scanMembers(sb, PAGE)
+    const rows: MemberScanRow[] = await scanMembers(sb, PAGE, options.memberIds)
+    if (options.memberIds && (rows.length !== options.memberIds.length || rows.some(r => !options.memberIds!.includes(r.id))))
+      return res.status(409).json({ ok: false, code: 'TARGET_CHANGED', message: '일부 회원이 없거나 삭제·탈퇴·정지 상태입니다. 발급하지 않았습니다.' })
+    if (caller.kind === 'staff' && caller.role === 'rep' && rows.some(r => r.assigned_staff_id !== caller.actor))
+      return res.status(403).json({ ok: false, code: 'TARGET_FORBIDDEN', message: '본인 담당 회원만 발급할 수 있습니다.' })
 
-    // 방어선. 커서 방식이면 중복이 나올 수 없지만, 새는 순간 대가가 '유료회원 문자 두 번 +
-    // 발송비 이중 지출'이라 값싼 검사를 한 겹 더 둔다.
+    // 방어선. 커서 방식이면 중복이 나올 수 없지만, 여기서 새는 순간 대가가 '유료회원에게
+    // 문자 두 번 + 발송비 이중 지출'이라 값이 싼 검사를 한 겹 더 둔다. 조용히 넘기지 않고
+    // 로그를 남겨, 다시 새면 원인을 바로 짚을 수 있게 한다.
     const seenIds = new Set<string>()
     const dupIds: string[] = []
     const uniqueRows = rows.filter((r) => {
@@ -1009,15 +1133,19 @@ export default async function handler(req: any, res: any) {
     let issued = 0
     let skippedRound = 0
     let skippedDay = 0
+    let skippedPaused = 0
+    const skippedExpired = 0 // 88의 기존 발급 정책에는 end_date 차단이 없다.
     let smsSent = 0
     let smsFail = 0
     let errCount = 0
+    let reviewRequired = 0
+    const results: Record<string, unknown>[] = []
     // 1) 적격 회원 선별(게이트) — CPU만, 빠름. 발급/발송은 2)에서 병렬.
     const eligible: {
       r: (typeof uniqueRows)[number]
       meta: Record<string, unknown>
-      recos: WeeklyRecoIssue[]
       count: number
+      sender: string
     }[] = []
     // 판정은 recoSkipReason 한 곳에서만 한다 — 발송 후 누락 대조와 같은 함수를 쓰기 위함.
     const gateCtx: RecoGateCtx = {
@@ -1029,27 +1157,97 @@ export default async function handler(req: any, res: any) {
     }
     for (const r of uniqueRows) {
       const meta = r.meta ?? {}
-      const skip = recoSkipReason(r, gateCtx)
-      if (skip === 'day' || skip === 'paused' || skip === 'count-zero') {
+      const contextProblem = object(meta) ? recoContextProblem(meta) : 'INVALID_META'
+      if (contextProblem) {
+        if (contextProblem === 'HELD') skippedPaused++
+        else errCount++
+        if (options.memberIds) results.push({ member_id: r.id, status: 'skipped', code: contextProblem, round_no: targetRound })
+        continue
+      }
+      // Manual issuance is a single identified member. It bypasses the weekday only;
+      // hold and an existing issue still prevent a new issue (88 has no expiry gate). An explicit
+      // one-off count may override count-zero without changing the member setting.
+      const manualMeta = { ...meta, weekly_reco_day: today,
+        ...(options.setCount !== undefined ? { weekly_reco_count: options.setCount } : {}) }
+      const skip = recoSkipReason(options.mode === 'manual' ? { ...r, meta: manualMeta } : r, gateCtx)
+      if (skip && options.memberIds) results.push({ member_id: r.id, status: 'skipped', code: skip.toUpperCase(), round_no: targetRound })
+      if (skip === 'day' || skip === 'count-zero') {
         skippedDay++
+        continue
+      }
+      if (skip === 'paused') {
+        skippedPaused++
         continue
       }
       if (skip === 'already') {
         skippedRound++
         continue
       }
-      const recos = Array.isArray(meta.weekly_recos) ? (meta.weekly_recos as WeeklyRecoIssue[]) : []
-      const count =
+      const configuredCount =
         typeof meta.weekly_reco_count === 'number' && (meta.weekly_reco_count as number) > 0
           ? (meta.weekly_reco_count as number)
           : baseCount
-      eligible.push({ r, meta, recos, count })
+      const count = options.setCount ?? configuredCount
+      if (!Number.isInteger(count) || count < 1 || count > (options.mode === 'manual' ? 100 : 1000)) {
+        errCount++
+        if (options.memberIds) results.push({ member_id: r.id, status: 'error', code: 'INVALID_COUNT', round_no: targetRound })
+        continue
+      }
+      const sourceSite = typeof meta.source_site === 'string' && meta.source_site.trim() ? meta.source_site.trim() : '88lotto'
+      const wantsSms = options.mode === 'manual' ? manualSmsOn : expectsComboSms(r, { paidSmsOn })
+      const memberSender = senderFor(sourceSite)
+      if (wantsSms && !memberSender) {
+        errCount++
+        if (options.memberIds) results.push({ member_id: r.id, status: 'error', code: 'SMS_SENDER_UNSET', round_no: targetRound })
+        continue
+      }
+      eligible.push({ r, meta, count, sender: memberSender })
     }
+
+    if (options.dryRun) {
+      // No claim RPC, metadata update, audit log, provider request or self-chain.
+      const priorClaims = new Map<string, string>()
+      let claimCursor: string | null = null
+      for (;;) {
+        let query = sb.from('reco_issue_ledger').select('id,member_id,status').eq('round_no', targetRound).order('id').limit(1000)
+        if (options.memberIds) query = query.in('member_id', options.memberIds)
+        if (claimCursor) query = query.gt('id', claimCursor)
+        const receiptState = await query
+        if (receiptState.error) return res.status(503).json({ ok: false, dryRun: true, code: 'RECEIPT_LOOKUP_UNAVAILABLE', issued: 0, smsSent: 0 })
+        const claimRows = receiptState.data ?? []
+        for (const row of claimRows) if (typeof row.member_id === 'string' && typeof row.status === 'string') priorClaims.set(row.member_id, row.status)
+        if (claimRows.length < 1000 || options.memberIds) break
+        const nextCursor: unknown = claimRows[claimRows.length - 1]?.id
+        if (typeof nextCursor !== 'string' || nextCursor === claimCursor) return res.status(503).json({ ok: false, dryRun: true, code: 'RECEIPT_SCAN_INVALID', issued: 0, smsSent: 0 })
+        claimCursor = nextCursor
+      }
+      const preview = eligible.map(({ r, count, sender: registeredSender }) => {
+        const site = typeof r.meta?.source_site === 'string' && r.meta.source_site.trim() ? r.meta.source_site.trim() : '88lotto'
+        const wantsSms = options.mode === 'manual' ? manualSmsOn : expectsComboSms(r, { paidSmsOn })
+        const senderMissing = wantsSms && !registeredSender?.replace(/\D/g, '')
+        const prior = priorClaims.get(r.id)
+        return { member_id: r.id, source_site: site, status: prior ? 'review_required' : senderMissing ? 'skipped' : 'dry_run',
+          code: prior ? 'EXISTING_CLAIM' : senderMissing ? 'SMS_SENDER_UNSET' : 'READY_TO_CLAIM', round_no: targetRound, set_count: count,
+          would_request_sms: wantsSms && !senderMissing && !prior, approval_verified: false }
+      })
+      return res.status(200).json({ ok: true, dryRun: true, round_no: targetRound, issued: 0, smsSent: 0, smsFail: 0,
+        wouldIssue: preview.filter(r => r.status === 'dry_run').length, wouldSend: preview.filter(r => r.would_request_sms).length,
+        skippedDay, skippedPaused, skippedExpired, skippedRound, errors: errCount,
+        results: options.memberIds ? [...results, ...preview] : [],
+        message: '읽기 전용 사전점검입니다. 승인·업체 접수·수신을 확인한 결과가 아닙니다.' })
+    }
+
+    // 유료회원 우선 처리(현장 피드백 7/31) — 금요일은 무료회원 기본요일과 겹쳐 대상이 수천 명대로
+    // 커지는데, 실제로 이 함수가 Vercel maxDuration(300초)에 걸려 중간에 강제 종료되면서 뒤쪽 순서의
+    // 회원은 그날 발급·문자를 통째로 못 받는 사고가 있었다(이 실행분은 마지막 로그 기록조차 남기지
+    // 못한 채 끊겼다 — 완주 실패의 증거). 유료(결제) 회원은 수가 훨씬 적으니 배열 맨 앞으로 보내
+    // 타임아웃이 나더라도 무료회원 쪽에서 잘리게 한다(유료회원 발급 누락을 최소화).
+    eligible.sort((a, b) => Number(PAID_GRADES.has(b.r.grade)) - Number(PAID_GRADES.has(a.r.grade)))
 
     // 2) 발급 + (유료)SMS — 동시성 제한 병렬. 순차로는 1000+명 발송이 함수 타임아웃(수십분)에 걸려
     //    일부만 나가던 위험을 차단(현장 6/24, 이윤선 1883명 대비). 단건 실패는 격리(잔여 진행).
     const CONC = 12
-    const processOne = async ({ r, meta, recos, count }: (typeof eligible)[number]) => {
+    const processOne = async ({ r, meta, count, sender }: (typeof eligible)[number]) => {
       const exclude = excludeFor(r.grade)
       // 로직 round(count×ratio%) + 완전랜덤 나머지(소스: src/lib/lottoGenerator.generateIssueSets)
       const logicCount = Math.max(0, Math.min(count, Math.round((count * ratio) / 100)))
@@ -1072,72 +1270,109 @@ export default async function handler(req: any, res: any) {
         sets.push(set)
       }
       const issue: WeeklyRecoIssue = { round_no: targetRound, issued_at: ts, sets }
-      const nextMeta = { ...meta, weekly_recos: [issue, ...recos].slice(0, KEEP) }
-      const { error } = await sb.from('members').update({ meta: nextMeta }).eq('id', r.id)
-      if (error) {
-        errCount++ // 단건 실패가 잔여 회원 발급을 막지 않도록 격리(D68 #8)
+      const wantsSms = options.mode === 'manual' ? manualSmsOn : expectsComboSms(r, { paidSmsOn })
+      const sourceSite = typeof meta.source_site === 'string' && meta.source_site.trim() ? meta.source_site.trim() : '88lotto'
+      const claimed = await sb.rpc('reco_issue_claim', {
+        p_member_id: r.id, p_round_no: targetRound, p_expected_meta: meta, p_issue: issue,
+        p_expected_site: sourceSite, p_today: todayKst, p_weekday: today, p_mode: options.mode,
+        p_also_sms: wantsSms, p_actor: caller.actor, p_set_count: options.setCount ?? null,
+        p_expected_grade: r.grade, p_expected_phone: r.phone,
+      })
+      const claim: unknown = claimed.data
+      if (claimed.error || !object(claim) || claim.ok !== true) {
+        errCount++; reviewRequired++
+        if (options.memberIds) results.push({ member_id: r.id, status: 'review_required', code: 'CLAIM_UNCONFIRMED', round_no: targetRound })
+        return
+      }
+      if (claim.claimed === false) {
+        if (claim.status === 'review_required') reviewRequired++
+        if (options.memberIds) results.push({ member_id: r.id, status: claim.status === 'review_required' ? 'review_required' : 'skipped',
+          code: typeof claim.reason === 'string' ? claim.reason : 'NOT_CLAIMED', round_no: targetRound })
+        return
+      }
+      const claimedMember = object(claim.member) && claim.member.meta === null ? { ...claim.member, meta: {} } : claim.member
+      const claimedIssue = claim.issue
+      if (claim.claimed !== true || (typeof claim.claim_id !== 'string' && typeof claim.claim_id !== 'number')
+        || typeof claim.claim_token !== 'string' || !claim.claim_token || typeof claim.should_send !== 'boolean'
+        || !object(claimedMember) || claimedMember.id !== r.id || (claimedMember.name !== null && typeof claimedMember.name !== 'string')
+        || (claimedMember.phone !== null && typeof claimedMember.phone !== 'string') || !object(claimedMember.meta)
+        || (claim.should_send && typeof claimedMember.phone !== 'string')
+        || (typeof claimedMember.meta.source_site === 'string' && claimedMember.meta.source_site.trim() ? claimedMember.meta.source_site.trim() : '88lotto') !== sourceSite
+        || !object(claimedIssue) || claimedIssue.round_no !== targetRound
+        || JSON.stringify(claimedIssue.sets) !== JSON.stringify(sets)) {
+        errCount++; reviewRequired++
+        if (options.memberIds) results.push({ member_id: r.id, status: 'review_required', code: 'CLAIM_CONTRACT_INVALID', round_no: targetRound })
         return
       }
       issued++
-
-      // 유료회원(골드/골드+/VIP/로얄) 지정요일 조합 SMS 자동발송 — 신규 발급분만(멱등).
-      if (paidSmsOn && PAID_GRADES.has(r.grade) && r.phone) {
-        const smsBody = formatComboSms(r.name ?? '', targetRound, sets, recoTplBody)
-        const sres = await sendComboSms(selfBase, r.phone, smsBody, sender)
-        await sb.from('sms_sends').insert({
-          // 병렬 동시삽입 PK 충돌 방지: 시간+난수+회원 꼬리.
-          id: `sms_cron_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}_${r.id.slice(-6)}`,
-          member_id: r.id,
-          template_key: null,
-          phone: r.phone,
-          body: smsBody,
-          type: 'recommend',
-          status: sres.ok ? '발송완료' : `실패(${sres.code ?? '?'})`,
-          sent_at: ts,
-        })
-        if (sres.ok) smsSent++
-        else smsFail++
+      let outcome: 'accepted' | 'rejected' | 'unknown' | 'not_requested' = 'not_requested'
+      let receipt: Record<string, unknown> = { code: 'NOT_REQUESTED' }
+      if (claim.should_send) {
+        const smsBody = formatComboSms(typeof claimedMember.name === 'string' ? claimedMember.name : '', targetRound, sets, recoTplBody)
+        const sent = await sendComboSms(selfBase, r.id, String(claimedMember.phone), smsBody, sender, sourceSite)
+        outcome = sent.outcome; receipt = sent.receipt
+        if (outcome === 'accepted') smsSent++
+        else { smsFail++; reviewRequired++ }
       }
+      const finished = await sb.rpc('reco_issue_finish', {
+        p_claim_id: claim.claim_id, p_claim_token: claim.claim_token, p_outcome: outcome, p_receipt: receipt,
+      })
+      const finish: unknown = finished.data
+      if (finished.error || !object(finish) || finish.ok !== true || finish.outcome !== outcome) {
+        errCount++; reviewRequired++
+        if (options.memberIds) results.push({ member_id: r.id, status: 'review_required', code: 'RECEIPT_UNCONFIRMED',
+          sms_outcome: outcome, round_no: targetRound, sets })
+        return
+      }
+      if (options.memberIds) results.push({ member_id: r.id, status: 'issued', code: outcome === 'accepted' ? 'PROVIDER_ACCEPTED' : outcome.toUpperCase(),
+        sms_outcome: outcome, round_no: targetRound, sets })
     }
-    // 유료회원 우선 처리 — 예산을 넘겨 잘리더라도 무료회원 쪽에서 잘리게 한다.
-    // 유료(결제) 회원의 발급 누락이 가장 비싼 실패라서 배열 맨 앞으로 보낸다.
-    eligible.sort((a, b) => Number(PAID_GRADES.has(b.r.grade)) - Number(PAID_GRADES.has(a.r.grade)))
-
-    // 시간예산 가드 (현장 9/15 사고 — 유료회원 1,986명 중 1,035명만 발송되고 나머지 951명이
-    // 발급도 로그도 없이 사라졌다). 이 함수는 vercel.json 의 maxDuration=300초에 걸리면 통째로
-    // 강제 종료되는데, 그러면 뒤쪽 순서의 회원은 그날 발급·문자를 못 받고 그 사실조차 남지 않는다.
+    // 시간예산 가드(현장 피드백 7/31) — 대상이 수천 명이면 전체 처리가 Vercel maxDuration(300초)을
+    // 넘겨 함수가 통째로 강제 종료되고, 뒤쪽 회원은 발급도 로그도 없이 조용히 누락됐다(7/31 사고).
     // 예산을 넘기면 남은 대상을 남겨둔 채 정상 종료(로그 기록)하고, 이어서 처리할 후속 실행을
     // 스스로 트리거한다 — 한 번에 다 못 해도 여러 번에 나눠 반드시 완주하게 한다.
-    // (재실행은 위 멱등 검사(recos[0].round_no === targetRound)로 이미 처리된 회원을 건너뛴다.)
-    // 형제 프로젝트 PlusLotto 가 7/31 같은 사고 후 넣은 가드인데 이쪽에 반영되지 않아 재발했다.
+    // (재실행은 같은 회차의 이력 및 영구 선점 원장으로 이미 처리한 회원을 건너뛴다.)
     const BUDGET_MS = 240_000 // maxDuration 300초 중 안전 여유를 남긴 값
     let processed = 0
     for (let i = 0; i < eligible.length; i += CONC) {
       if (Date.now() - startedAt > BUDGET_MS) break
       const slice = eligible.slice(i, i + CONC)
-      await Promise.all(slice.map(processOne))
+      await Promise.all(slice.map(async row => {
+        try { await processOne(row) } catch {
+          // A lost claim/finish response can mean the transaction committed. Never retry.
+          errCount++; reviewRequired++
+          if (options.memberIds) results.push({ member_id: row.r.id, status: 'review_required', code: 'EXECUTION_UNCONFIRMED', round_no: targetRound })
+        }
+      }))
       processed += slice.length
     }
     const remaining = Math.max(0, eligible.length - processed)
 
-    await sb.from('logs').insert({
-      id: `log_cron_${Date.now().toString(36)}`,
+    const auditLog = await sb.from('logs').insert({
+      id: `log_reco_${randomUUID()}`,
       kind: 'admin',
-      actor: null,
-      action: 'reco.weekly_issue',
+      actor: caller.actor,
+      action: options.mode === 'manual' ? 'reco.manual_issue' : 'reco.weekly_issue',
       target_type: 'member',
       target_id: null,
       // started_at — 누락 대조(audit=1)가 '이 시각 이후 가입자는 대상 아님'을 판정하는 기준.
-      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, errors: errCount, round_no: targetRound, stale_round: staleRound, channel: 'cron', force, sms_sent: smsSent, sms_fail: smsFail, remaining, chain, started_at: new Date(startedAt).toISOString() },
+      meta: { count: issued, skipped: skippedRound, skipped_day: skippedDay, skipped_paused: skippedPaused, skipped_expired: skippedExpired, errors: errCount, review_required: reviewRequired, round_no: targetRound, stale_round: staleRound,
+        channel: options.memberIds ? 'scoped' : 'cron', force, sms_sent: smsSent, sms_fail: smsFail, remaining, chain,
+        ...(options.memberIds ? { member_ids: options.memberIds } : {}), started_at: new Date(startedAt).toISOString() },
       created_at: ts,
     })
+    if (auditLog.error) {
+      errCount++; reviewRequired++
+      // Issuance may already be durable: report the audit gap, never replay claims.
+      if (options.memberIds) results.push({ status: 'review_required', code: 'AUDIT_LOG_UNCONFIRMED', round_no: targetRound })
+    }
 
-    // 잔여분을 이어서 처리할 후속 실행을 띄운다.
-    // 응답을 기다리지 않는다(자기 자신을 await 하면 이 실행이 타임아웃된다).
+    // 남은 대상이 있으면 후속 실행을 트리거해 이어서 처리한다(연쇄 상한으로 폭주 방지).
+    // 응답을 기다리지 않고(자기 자신을 await 하면 타임아웃) 요청만 띄운다.
     const MAX_CHAIN = 20
-    if (remaining > 0 && chain < MAX_CHAIN) {
+    if (!options.memberIds && remaining > 0 && chain < MAX_CHAIN) {
       try {
-        const nextUrl = `${selfBase}/api/weekly-reco?chain=${chain + 1}${force ? '&force=1' : ''}`
+        const nextUrl = `${selfBase}/api/weekly-reco?chain=${chain + 1}`
         await Promise.race([
           fetch(nextUrl, { method: 'GET', headers: { authorization: `Bearer ${secret}` } }),
           new Promise((resolve) => setTimeout(resolve, 1500)),
@@ -1145,8 +1380,8 @@ export default async function handler(req: any, res: any) {
       } catch {
         /* 후속 트리거 실패는 다음 크론 주기가 회수 — 이번 실행 결과를 실패로 만들지 않는다 */
       }
-    } else if (remaining === 0) {
-      // 이번 회차 처리가 끝났다 → 곧바로 누락 대조를 한 번 돌린다.
+    } else if (!options.memberIds && remaining === 0) {
+      // 이번 회차 처리가 끝났다 → 곧바로 누락 대조를 한 번 돌린다(현장 9/12 요청).
       // 별도 요청으로 띄워 이 실행이 maxDuration 에 걸리지 않게 한다. 실패해도 vercel.json 의
       // 대조 크론이 같은 날 다시 돈다.
       try {
@@ -1162,7 +1397,10 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    return res.status(200).json({ ok: true, round_no: targetRound, issued, skippedRound, skippedDay, errors: errCount, staleRound, smsSent, smsFail, remaining, chain })
+    return res.status(200).json({ ok: errCount === 0 && reviewRequired === 0,
+      code: reviewRequired > 0 ? 'RECEIPT_CONFIRMATION_REQUIRED' : 'COMPLETE', dryRun: false,
+      round_no: targetRound, issued, skippedRound, skippedDay, skippedPaused, skippedExpired, errors: errCount,
+      reviewRequired, staleRound, smsSent, smsFail, remaining, chain, results })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return res.status(500).json({ ok: false, code: 'ERROR', message })
