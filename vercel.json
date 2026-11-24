@@ -1,17 +1,133 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "redirects": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.88lotto.co.kr"
+        }
+      ],
+      "destination": "/portal",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "88lotto.co.kr"
+        }
+      ],
+      "destination": "/portal",
+      "permanent": false
+    },
+    {
+      "source": "/:path((?!portal|api/|assets/)[^.]+)",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.88lotto.co.kr"
+        }
+      ],
+      "destination": "https://www.88master.co.kr/:path",
+      "permanent": false
+    },
+    {
+      "source": "/:path((?!portal|api/|assets/)[^.]+)",
+      "has": [
+        {
+          "type": "host",
+          "value": "88lotto.co.kr"
+        }
+      ],
+      "destination": "https://www.88master.co.kr/:path",
+      "permanent": false
+    },
+    {
+      "source": "/portal",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.88master.co.kr"
+        }
+      ],
+      "destination": "https://www.88lotto.co.kr/portal",
+      "permanent": false
+    },
+    {
+      "source": "/portal",
+      "has": [
+        {
+          "type": "host",
+          "value": "88master.co.kr"
+        }
+      ],
+      "destination": "https://www.88lotto.co.kr/portal",
+      "permanent": false
+    },
+    {
+      "source": "/portal/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.88master.co.kr"
+        }
+      ],
+      "destination": "https://www.88lotto.co.kr/portal/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/portal/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "88master.co.kr"
+        }
+      ],
+      "destination": "https://www.88lotto.co.kr/portal/:path*",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
   "functions": {
-    "api/weekly-reco.ts": { "maxDuration": 300 },
-    "api/weekly-lotto-sync.ts": { "maxDuration": 300 },
-    "api/send-sms.ts": { "maxDuration": 30 },
-    "api/transcribe-call.ts": { "maxDuration": 60 },
-    "api/ingest-call-recording.ts": { "maxDuration": 30 },
-    "api/analyze-call.ts": { "maxDuration": 45 }
+    "api/weekly-reco.ts": {
+      "maxDuration": 300
+    },
+    "api/weekly-lotto-sync.ts": {
+      "maxDuration": 300
+    },
+    "api/send-sms.ts": {
+      "maxDuration": 30
+    },
+    "api/transcribe-call.ts": {
+      "maxDuration": 60
+    },
+    "api/ingest-call-recording.ts": {
+      "maxDuration": 30
+    },
+    "api/analyze-call.ts": {
+      "maxDuration": 45
+    }
   },
   "crons": [
-    { "path": "/api/weekly-lotto-sync", "schedule": "*/5 * * * *" },
-    { "path": "/api/weekly-reco", "schedule": "0 0 * * *" },
-    { "path": "/api/weekly-reco?audit=1", "schedule": "0 5 * * *" }
+    {
+      "path": "/api/weekly-lotto-sync",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/weekly-reco",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/weekly-reco?audit=1",
+      "schedule": "0 5 * * *"
+    }
   ]
 }
