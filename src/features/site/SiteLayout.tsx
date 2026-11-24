@@ -11,7 +11,7 @@
 //
 //   ※ <MemberAuthProvider> 는 상위(app/providers)에서 1회 래핑되어 있어야 한다(useMemberAuth 사용).
 // ─────────────────────────────────────────────────────────────────────────
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BRAND } from '@/lib/brand'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LogIn, LogOut, Menu, User, X } from 'lucide-react'
@@ -56,6 +56,15 @@ export function SiteLayout() {
   const { member, logout } = useMemberAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // 브라우저 탭 제목도 고객용으로(관리자 index.html 기본값 '로또 운영 콘솔' 대신). 떠날 때 원래 제목 복원.
+  useEffect(() => {
+    const prev = document.title
+    document.title = `${BRAND.name} | AI 로또 번호 추천`
+    return () => {
+      document.title = prev
+    }
+  }, [])
 
   function handleLogout() {
     logout()
